@@ -13,10 +13,11 @@ jobs:
         run: tools/check_kit.sh
       - name: Decoder and assembler agree (TLCS-900/H)
         run: python3 tools/ngpref/test_asm.py
-      - name: The reference machine and the port's machine compile without warnings
+      - name: The reference machine, the port's machine and its sound player compile without warnings
         run: |
           cc -O2 -Wall -Wextra -Werror -o /tmp/ngpref tools/ngpref/ngpref.c src/ngpc/k2ge.c
           cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/ngp.c -o /tmp/ngp.o
+          for f in psg sndplay; do cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/$f.c -o /tmp/$f.o; done
   bench:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
