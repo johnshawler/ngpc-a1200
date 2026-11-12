@@ -412,6 +412,9 @@ def native(d, live):
 
 # ---- liveness of the flags ----
 in_use = collections.defaultdict(int)                       # flags a function reads from cpu.sr when it is entered
+ret_live = collections.defaultdict(int)                     # flags its callers read after it returns: what its RET stores
+PRECISE_RET = getattr(game, 'PRECISE_RET', True)            # False: every RET stores all flags (if a game unwinds its stack)
+cur_entry = [None]
 
 def exit_flags(t):
     """flags that must be in cpu.sr when control leaves the function for t"""
@@ -443,7 +446,7 @@ def node_info(a, aset, waits):
     if kind == 'ret':
         if d.mnem == 'reti': return 0, ALLF, succ, out
         if cc is not None: edge(fall)
-        return use | ALLF, 0, succ, out
+        return use | (ret_live[cur_entry[0]] if PRECISE_RET else ALLF), 0, succ, out
     if kind in ('jump', 'branch'):
         if a in waits: use |= ALLF
         if target is not None:
@@ -463,6 +466,7 @@ def node_info(a, aset, waits):
     return ALLF, 0, succ, out
 
 def liveness(entry):
+    cur_entry[0] = entry
     addrs = body(entry)
     aset = set(addrs)
     waits = find_waits(addrs, aset)
@@ -485,6 +489,24 @@ def liveness(entry):
         live_out[a] = lo
     return addrs, aset, waits, live_in, live_out
 
+def leaves(entry, addrs, aset):
+    """(static call targets with the call's address, entries this function jumps to): for ret_live"""
+    calls, jumps = [], set()
+    for a in addrs:
+        d = insn(a)
+        if not d: continue
+        kind, cc, target = T.flow(d)
+        fall = (a + d.length) & 0xffffff
+        if kind == 'call' and target is not None and target in entries: calls.append((a, target))
+        outs = []
+        if kind in ('jump', 'branch') and target is not None: outs.append(target)
+        if kind in ('jump', 'branch') and target is None: outs += sorted(ind_jump.get(a, ()))
+        if kind not in ('jump', 'ret', 'halt') or (kind == 'branch'): outs.append(fall)
+        if kind == 'ret' and cc is not None: outs.append(fall)
+        for t in outs:
+            if t not in aset and t in entries: jumps.add(t)
+    return calls, jumps
+
 def find_waits(addrs, aset):
     waits = {}
     for a in addrs:
@@ -497,13 +519,21 @@ def find_waits(addrs, aset):
     return waits
 
 def solve_in_use():
-    """which flags each function reads on entry: a fixed point over all functions (they call each other)"""
-    for it in range(50):
+    """which flags each function reads on entry, and which its callers read after it returns: a fixed point over all
+    functions (they call each other). Functions entered from outside (start, interrupts, calls through registers)
+    return all flags."""
+    for e in {start} | vectors | ind_call | set(EXTRA_ENTRIES): ret_live[e] = ALLF
+    for it in range(100):
         changed = 0
         for e in sorted(entries):
             addrs, aset, waits, live_in, live_out = liveness(e)
             v = live_in.get(e, ALLF)
             if v != in_use[e]: in_use[e] = v; changed += 1
+            calls, jumps = leaves(e, addrs, aset)
+            for a, t in calls:
+                if live_out[a] & ~ret_live[t]: ret_live[t] |= live_out[a]; changed += 1
+            for t in jumps:
+                if ret_live[e] & ~ret_live[t]: ret_live[t] |= ret_live[e]; changed += 1
         if not changed: return it + 1
     raise SystemExit('recomp900: the flag liveness does not settle')
 
@@ -538,7 +568,7 @@ def gen_function(entry):
             if d.ops[0][1] == 1: L.append('ngp_bios_call(cpu.bank[3][0] >> 8 & 0xff);')
             else: L.append('ngp_fatal(0x%06x, 1); return 0;' % a); ft = False
         elif kind == 'ret':
-            if d.mnem == 'ret' and NATIVE: pop = '%s return POP32() & 0xffffff;' % savef(ALLF)
+            if d.mnem == 'ret' and NATIVE: pop = '%s return POP32() & 0xffffff;' % savef(ret_live[entry] if PRECISE_RET else ALLF)
             else: pop = step + ' return cpu.pc;'            # RETD and RETI: by the step
             if cc is None: L.append(pop); ft = False
             else: L.append('if (%s) { %s }' % (cond, pop))
