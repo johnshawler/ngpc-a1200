@@ -35,7 +35,8 @@ With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
                        ticks=3600 checksum=ac36a76c game_speed=95%
                        logic_cck=22751 max=451508 pics=285/472 draw_cck=182312 conv_cck=70968
                        PASS (per-pixel game: 19.5 pictures a second, game time at 95% of the clock: it falls behind where
-                       a pass takes more than 8 frames). With sound playing. A pass whose ticks took over 2 frames
+                       a pass takes more than 8 frames; shown_fps counts passes: see the frame rate claim). With sound
+                       playing. A pass whose ticks took over 2 frames
                        draws no new picture (at most 8 in a row); without that rule (and before block copies were
                        one call): 15.1 and 83%.
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
@@ -57,14 +58,14 @@ Frame rate claim:      With 4 MB fast RAM: logic at 60 ticks a second where a pa
                        single ticks run up to 17,000 main-CPU instructions and change 7,600 bytes of video memory
                        (up to 451,508 colour clocks, 6.4 frames, for one tick).
                        Cheapest upgrade likely to reach full game speed: not measured.
-Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
-                       ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
+Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a display that holds 50 Hz; real A1200
+                       hardware; a Commodore Kickstart ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
                        pictures of the intro, 0 of 24,320 pixels differ); play by a person (controls are wired,
                        untested); scenes beyond the bench (title, menus, course intro, first hole): their code is not
                        traced, so the port stops there with reason 2; the profiling build on runs longer than 900 ticks
                        (it did not finish 3,600); CI (the images cannot be committed to this public repository).
 How to run:            put the cartridge image at original/ntm.ngc and, if you have it, the BIOS image at
                        original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
-                       dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a Shell ("ntm bench
-                       3600" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor
+                       dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a
+                       Shell ("ntm bench 3600" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor
                        keys = pad, X = A, Z = B, Space or Return = Option, Esc = quit.
