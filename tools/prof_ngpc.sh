@@ -16,7 +16,7 @@ for f in '"$SOURCES src/prof68k.s"'; do
   o=dist/obj_prof/$(echo "$f" | tr "/." "__").o
   case "$f" in
     *.c) m68k-amigaos-gcc -m68020 -O2 -fomit-frame-pointer -noixemul -Wall $CFLAGS -c "$f" -o "$o" ;;
-    *.s|*.asm) vasmm68k_mot -quiet -Fhunk -m68020 -I. -I"$(dirname "$f")" -o "$o" "$f" ;;
+    *.s|*.asm) vasmm68k_mot -quiet -Fhunk -m68020 -DNGP_PROF=1 -I. -I"$(dirname "$f")" -o "$o" "$f" ;;
   esac
   OBJS="$OBJS $o"
 done
@@ -33,7 +33,7 @@ import sys, struct, re, collections, bisect
 data = open(sys.argv[1], 'rb').read()
 main_rt, coro_rt = struct.unpack('>II', data[:8])
 samples = struct.unpack('>%dI' % ((len(data) - 8) // 4), data[8:])
-gl = dict((m.group(2), int(m.group(1), 16)) for m in re.finditer(r'^([0-9a-f]{8}) \w\s+\w*\s+\.text\s+[0-9a-f]+\s+(?:\S+\s+)?(_\w+)$', open(sys.argv[2]).read(), re.M))
+gl = dict((m.group(2), int(m.group(1), 16)) for m in re.finditer(r'^([0-9a-f]{8}) \w\s+\w*\s+\.text\s+[0-9a-f]+\s+(?:\S+\s+)?(_?\w+)$', open(sys.argv[2]).read(), re.M))
 objs = []                                                   # (hunk, start in the hunk, size, object)
 hunk, hstart = -1, 0                                        # code hunks: gcc's .text and vasm's code
 for line in open(sys.argv[3]):

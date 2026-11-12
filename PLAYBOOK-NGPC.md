@@ -10,10 +10,10 @@ checksum and the profiler.
 A new session remembers nothing but this file and the tools next to it. To start a port see `KICKOFF-NGPC.md`.
 
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
-translated to C and proven equal to the interpreter on the host; its sound program is replaced by a model of what
-the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in a
-black border, and the referee passes it as a per-pixel game (8.7 pictures a second, game time at 74% of the clock).
-What a finished port still needs is in section 8: faster logic (a 68k back end), a faster display, and sound.
+translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
+what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
+a black border, and the referee passes it as a per-pixel game (10.6 pictures a second, game time at 80% of the clock).
+What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
 
@@ -21,7 +21,7 @@ What a finished port still needs is in section 8: faster logic (a 68k back end),
 | --- | --- | --- |
 | CPU | `tools/tlcs900.py` (decoder, formatter), `tools/dis900.py`, `tools/asm900.py`, `src/ngpc/cpu900.h` (interpreter and the primitives the translation is built from), `src/ngpc/cycles900.h` | use as is |
 | Reference machine | `tools/ngpref/ngpref.c` (timed machine: CPU, Z80, timers, interrupts, BIOS calls in C, pictures), `src/ngpc/z80.h`, `src/ngpc/k2ge.c` | use; extend for what the game uses (section 8) |
-| Translator | `tools/recomp900.py` | use; add native instruction forms the report asks for |
+| Translator | `tools/recomp900.py` (C), `tools/back900.py` (its 68k back end) with `src/ngpc/run68k.c` | use; add native instruction forms the report asks for |
 | Port machine and frame model | `src/ngpc/ngp.{c,h}` (with the sound processor's model), `src/ngpc/gen900.h` (what the generated code is written in), `src/ngpc/logic.{c,h}`, `src/ngpc/run_c.c`, `src/coro.{h,s}`, `src/coro_host.c` | use; a game with another sound driver needs its own model (section 4) |
 | Proof | `src/ngpc/run_interp.c`, `src/ngpc/host_test.c` (`-k` checks the renderers), `tools/verify_ngpc.sh`, `tools/check_sound_ngpc.sh` | use as is |
 | Amiga side | `src/ngpc/main.c` (kit skeleton, the picture at 1:1 in a black border), `src/ngpc/k2ge.c` (`k2ge_frame_cached`) | use; a faster display is section 7 |
@@ -143,9 +143,36 @@ sound processor's frame of time, and the interrupts it raised.
   not: the Amiga checksum against the host's is the proof of the byte order.
 - An address register of `(-r)` and `(r+)` moves *before* the operation (as in `cpu900.h`): the generated
   code computes the address first for the same reason. `LDIR` and its kind re-execute themselves.
-- **What it costs** (section 6): the registers are still in memory, so gcc reloads them after every store. The
-  next step is a 68k back end that keeps them in 68k registers (`tools/back68k.py` of the NES port is the worked
-  example: its 68k code ran three times faster than its C).
+- **What it costs** (section 6): the registers are in memory, so gcc reloads them after every store. The 68k back
+  end below keeps them in 68k registers.
+
+**The 68k back end** (`tools/back900.py`, run by `recomp900.py` unless `NGP_NO68K=1`; it writes `src/ngpc/gen68k.s`,
+whose C side is `src/ngpc/run68k.c`). The same functions, the same liveness, the same frame model, in 68k assembly.
+`port.conf` chooses it with `BACKEND=68k` (the default) or the C translation with `BACKEND=c`.
+
+- **Registers**: d4-d7 = XWA, XBC, XDE, XHL of the current bank, a2-a5 = XIX, XIY, XIZ, XSP, d3 = the flags in the
+  68k condition codes' bit order (C, V, Z, S in bits 0-3, H in 5, N in 6: one `move.w ccr,d3` saves the four the
+  68k computes), a6 = work RAM - 0x4000; d0, d1, d2, a0, a1 are scratch. A function returns the next address in
+  d0, as in C. Byte and word registers are rotated into the low end of their long and back.
+- **Everything else goes to C with the registers written out** (`SYNCOUT`, `asm_regs_out`) and read back: waits,
+  BIOS calls, `SWI`, unknown addresses, and every form without 68k code, which runs through the interpreter's step
+  (`asm_step`). The generator prints how many sites and which forms.
+- **Registers named by their bank** (`XWA1`, `XDE2`: TLCS-900 games use the other banks as extra globals) are
+  longs in `cpu.bank`, read at fixed addresses (`_cpu+offset`; `run68k.c` checks the layout when it compiles).
+  Only when that bank is the current one are they in d4-d7: one pointer compare per straight-line run of such
+  instructions chooses, and the rare case (d4-d7 written out, the same code, read back) is out of line. Neo Turf
+  Masters runs bank 0 for all but 99 of 1.8 million instructions.
+- **Memory**: an access at an address known when translating goes straight to RAM, the cartridge or the video
+  memory routine; one through a register has the work-RAM case inline and calls the routine (`rd8`...`wr32` in the
+  file's header) for everything else. Writes to 0x8800-0xBFFF go through `vidw`, which marks the changed cell or
+  character as `ngp_vidw` does. Values with bits 24-31 set take the routine, which masks them.
+- **Proof**: as for the C. The host test is the reference; the Amiga's checksum must equal it (`tools/port.sh`),
+  and `tools/debug_ngpc.sh <dir> N` finds the first tick where they differ (a build with the checksum after every
+  tick, compared with `host_test N -V`). A profiling build exports every function's label (`-DNGP_PROF` for vasm),
+  so `tools/prof_ngpc.sh` names `F_<address>` and the runtime routines.
+- **Count the step by executions, not by sites.** 50 executions a tick of four stepped `LD XWA2,#imm` cost a third
+  of the logic: each step writes out and reads back every register and decodes in C. A host build of the
+  interpreter that counts executions per address (as `run_interp.c` with a counter) finds them in seconds.
 
 ## 6. The verdict, before writing code
 
@@ -167,9 +194,16 @@ ticks of the bench; a frame has 71,051, and 60 ticks a second need 1.2 a frame):
 | The sound processor as events, and a model of its driver instead of the Z80 (section 4) | 178,759 |
 | Flags in locals with liveness, registers by address, direct memory (`gen900.h`) | 43,478 |
 | Video memory written directly by the translated code | 31,325 |
+| 68k back end, first version (fixed-bank registers, `EX` and calls through registers stepped) | 114,951 |
+| ... `EX`, `LD` with a fixed bank, calls through registers native | 84,885 |
+| ... fixed-bank registers as ordinary operands (still spilling d4-d7 around each) | 61,995 |
+| ... video memory written by `vidw` in assembly, not through C | 32,576 |
+| ... addresses known when translating go straight to memory | 30,251 |
+| ... one pointer compare per run instead of spilling d4-d7 | 28,456 |
+| ... the work-RAM case inline at every access through a register | 26,879 |
 
-Over the whole 3,600-tick bench, logic averages 35,184 colour clocks a tick: at 60 ticks a second that is 59% of
-the machine before any picture is drawn. The console's CPU does up to 16,000 instructions a frame and they are 16-
+Over the whole 3,600-tick bench, logic averages 35,184 colour clocks a tick in C and 27,634 with the 68k back end: at
+60 ticks a second that is 59% and 47% of the machine before any picture is drawn. The console's CPU does up to 16,000 instructions a frame and they are 16-
 and 32-bit instructions: it is not a slower processor than a 14 MHz 68EC020. Plan for fast RAM and say so in the
 report from the start.
 
@@ -209,8 +243,10 @@ folded into Paula's fixed left and right channels. DAC samples need a sample pla
 
 ## 8. Not done yet (do it when a game needs it; the tools say when)
 
-- **Speed of the logic.** The C translation keeps the registers in memory. A 68k back end is the next step
-  (section 5).
+- **Speed of the logic.** The 68k back end still calls a routine for every access that is not work RAM, keeps
+  bank registers in memory, saves flags with `move.w ccr,d3` after every instruction whose flags are read, and
+  steps `DIV`, `LDF`, `CPIR` and a few `PUSH`/`POP`/`EX` forms (25 sites in Neo Turf Masters, none hot). The next
+  gains: flags left in the CCR until they are needed, the display (below) before any of it.
 - **Speed of the display** (section 7), and **sound** (section 7).
 - **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data cut
   down to what it reads (the reference machine could log that; it does not yet).
@@ -265,3 +301,15 @@ sections above if a lesson is general.
   tools existed); run `ngpref -m` on day one: what the game reads from its sound processor decides between a
   model and a translation; profile before optimising (`tools/prof_ngpc.sh`); build the 68k back end before judging
   speed.
+- Third session: the 68k back end (`tools/back900.py`). Its first version was slower than the C (114,951 against
+  31,325 colour clocks a tick) because everything it could not do went through the interpreter's step with all
+  registers written out and read back; counting the step's executions per address on the host, then making those
+  forms native, brought it to 26,879 (900 ticks), 14% below the C. Referee: 10.6 pictures a second, game time at 80%
+  of the clock, checksum equal. What paid, in order: registers of other banks as operands (the game uses banks 1
+  and 2 as globals while running in bank 0), video writes in assembly, then a pointer compare instead of spilling
+  d4-d7, addresses known when translating, and the work-RAM case inline.
+- A model of the kit's loop on the host (the instructions and video changes of each tick from the interpreter, a
+  cost per instruction and per picture from the Amiga bench) predicted the bench's game time within 3 points and
+  says what to speed up: here logic and display count about equally.
+- Next time: write the 68k back end with the bank guard, static addresses and inline RAM from the start; count
+  stepped executions on the host before the first Amiga run; build the loop model before choosing what to speed up.

@@ -5,6 +5,7 @@
  *
  *   host_test N            print the checksum after N ticks
  *   host_test N -v         also print the checksum every 100 ticks (to find the first tick that differs)
+ *   host_test N -V         print the checksum after every tick (tools/debug_ngpc.sh compares them with the Amiga's)
  *   host_test N -r file    also write the machine after every tick to file: RAM 0x4000-0x7FFF (16 KB), the K2GE
  *                          (16 KB), the ports (256 bytes), the registers (88 bytes: 20 longs, SR, F', stop reason, pc)
  *   host_test N -d t1,t2   also write the picture after these ticks as host_NNNNN.ppm
@@ -56,6 +57,7 @@ int main(int argc, char **argv)
     game_init(rom, (uint32_t)romlen, fontlen == 0x800 ? font : 0);
     for (t = 0; t < n; t++) {
         game_tick(game_bench_input(t));
+        if (argc > 2 && !strcmp(argv[2], "-V")) printf("%08x\n", (unsigned)game_checksum());
         if (verbose && (t + 1) % 100 == 0) printf("tick %u checksum %08x\n", t + 1, (unsigned)game_checksum());
         if (ramlog) {
             uint8_t r[88]; int i, j;
@@ -66,7 +68,8 @@ int main(int argc, char **argv)
         }
         if (dumps) { snprintf(key, sizeof key, ",%u,", t + 1); snprintf(list, sizeof list, ",%s,", dumps); if (strstr(list, key)) { snprintf(name, sizeof name, "host_%05u.ppm", t + 1); picture(name); } }
         if (argc > 2 && !strcmp(argv[2], "-k")) {
-            static uint8_t fr[K2GE_W * K2GE_H_LINES], ln[K2GE_W]; int y;
+            static uint8_t fi[K2GE_W * K2GE_H_LINES], fc[K2GE_W * K2GE_H_LINES], ln[K2GE_W]; int y;
+            uint8_t *fr = t % 3 == 0 ? fi : fc;     /* the cached one keeps its own picture: it redraws only what changed */
             if (t % 3 == 0) k2ge_frame_idx(ngp_vid, fr); else k2ge_frame_cached(ngp_vid, &ngp_dirty, fr);   /* both renderers, by turns */
             for (y = 0; y < K2GE_H_LINES; y++) { k2ge_line_idx(ngp_vid, y, ln); if (memcmp(ln, fr + y * K2GE_W, K2GE_W)) { printf("%s differs from k2ge_line_idx: tick %u, line %d\n", t % 3 == 0 ? "k2ge_frame_idx" : "k2ge_frame_cached", t + 1, y); return 1; } }
         }

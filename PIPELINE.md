@@ -48,21 +48,23 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
   measures **two** processors (main CPU and the Z80's sound program) and is preceded by a memory check: how
   much of the cartridge holds data.
 - Milestone 5's gate is `tools/verify_ngpc.sh`; milestone 6 is `tools/make_assets_ngpc.sh`.
-- Milestone 7 (68k back end) is not built for the TLCS-900/H: the Amiga runs the C translation, and the sound
-  program runs through an interpreter there. Both are the first things to replace (playbook section 8).
+- Milestone 7 (68k back end) is `tools/back900.py`: the Amiga runs 68k assembly made from the same functions and
+  liveness as the C (`BACKEND=c` in `port.conf` builds the C instead). The sound program does not run on the Amiga:
+  a model of what the game sees of it does (playbook section 4).
 - Milestones 10 to 14: a correct, slow picture exists (`src/ngpc/main.c`); a fast display and sound do not.
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: referee PASS as a per-pixel game with 4 MB fast RAM, 8.7 pictures a second, game time at 74% of the clock,
-checksum equal; no sound; the stock machine cannot hold the cartridge. Logic 35,184 colour clocks a tick over the
-bench (59% of the machine at 60 ticks a second), a picture 276,441 to draw and 126,203 to convert. The previous
-port's backlog is in history/llb/PIPELINE.md.
+Status: referee PASS as a per-pixel game with 4 MB fast RAM, 10.6 pictures a second, game time at 80% of the clock,
+checksum equal; no sound; the stock machine cannot hold the cartridge. Logic (68k back end) 27,634 colour clocks a
+tick over the bench (47% of the machine at 60 ticks a second), a picture 273,342 to draw and 126,201 to convert. A
+model of the kit's loop fed with the bench's instructions per tick: halving the logic gives about 95% game time,
+halving the display about 95%, both 100%. The previous port's backlog is in history/llb/PIPELINE.md.
 
 | Priority | Item | Why |
 | --- | --- | --- |
-| 1 | 68k back end for the main CPU (registers in 68k registers, flags in the CCR where they match) | logic is 59% of the machine; the NES port's 68k code was 3x its C |
-| 2 | The display's overlay and sprite loops in assembly; convert only rows that changed | 400k colour clocks a picture |
+| 1 | The display: lines and rows that did not change neither drawn nor converted; the overlay and sprite loops in assembly | 400k colour clocks a picture |
+| 2 | The 68k back end: flags kept in the CCR until read, fewer routine calls for memory that is not work RAM | logic is 47% of the machine |
 | 3 | Sound: the real driver's chip writes recorded per command on the host, played on Paula | no sound now |
 | 4 | Passes that take more than 8 frames (scene changes): spread the cell redraws | the cause of the lost game time |
 | 5 | Trace the rest of the game (other courses, modes) | untraced code stops the port |

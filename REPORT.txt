@@ -5,7 +5,9 @@ Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World r
 Class and route:       Binary TLCS-900/H code. The Step 1 table has no row for this CPU; the route is the one of its row
                        "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on the host
                        (tools/recomp900.py) to C, entry points found by tracing the game on a reference machine
-                       (tools/ngpref). K2GE, BIOS calls and interrupts are plain-C state (src/ngpc/ngp.c). The Z80 sound
+                       (tools/ngpref), and from there to 68k assembly (tools/back900.py: TLCS registers in 68k registers;
+                       BACKEND=c in port.conf builds the C instead). K2GE, BIOS calls and interrupts are plain-C state
+                       (src/ngpc/ngp.c). The Z80 sound
                        program is not run at all on the Amiga: what the game sees of it (an answer to each command, a
                        tick counter) is modelled, and tools/check_sound_ngpc.sh proves the model against the real
                        program, tick by tick. The display class is per-pixel (CLASS=perpixel), for the reasons below.
@@ -16,8 +18,8 @@ Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colour
                        kit's c2p1x1_8_c5_gen. A picture is drawn only when the game changed the K2GE's memory.
 Busiest moment:        play (ball flight and course views: both scroll planes, sprites, new picture every frame). Not
                        a Step 2 sum: the reference machine measures 1,700-3,900 main-CPU instructions a frame there
-                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 35,184
-                       colour clocks a tick over the bench, a picture 276,441 to draw and 126,203 to convert.
+                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 27,634
+                       colour clocks a tick over the bench, a picture 273,342 to draw and 126,201 to convert.
 Cut from the original: sound (nothing plays: the model answers the game, it makes no music); saved games (flash writes
                        are accepted and forgotten); the serial link; the date (fixed). Raster effects: not modelled, and
                        not seen used by this game in the bench (it takes the vertical blank interrupt only).
@@ -25,24 +27,24 @@ Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cann
                        enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
                        (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
 With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
-                       frames=707 late=3311 worst_cck=1903217 avg_cck=358989 budget_cck=71051 worst_pct=2678 avg_pct=505 display_hz=50 shown_fps=8.7
-                       ticks=3600 checksum=ac36a76c game_speed=74%
-                       logic_cck=35184 max=609704 pics=305/329 draw_cck=276441 conv_cck=126203
-                       PASS (per-pixel game: 8.7 pictures a second, game time at 74% of the clock: it falls behind where
+                       frames=791 late=2932 worst_cck=1991026 avg_cck=289013 budget_cck=71051 worst_pct=2802 avg_pct=406 display_hz=50 shown_fps=10.6
+                       ticks=3600 checksum=ac36a76c game_speed=80%
+                       logic_cck=27634 max=658439 pics=310/341 draw_cck=273342 conv_cck=126201
+                       PASS (per-pixel game: 10.6 pictures a second, game time at 80% of the clock: it falls behind where
                        a pass takes more than 8 frames)
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
                        the real sound program as the game sees it after every one of 3,600 ticks
                        (tools/check_sound_ngpc.sh), and the renderers equal the reference renderer after every tick
                        (host_test -k).
-Frame rate claim:      8.7 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
-                       within 8 frames; over the whole bench game time runs at 74% of the clock (3,600 ticks took 4,018
-                       frames, 3,000 would be real time). 50 Hz is not held and the stock machine does not start.
-                       Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, the wait for
-                       the vertical blank after slow passes, and the translated game code (registers in memory).
-                       Cheapest upgrade likely to reach full game speed: not measured. The next steps are a 68k back end
-                       for the translated code and a faster display (PLAYBOOK-NGPC.md sections 7 and 8).
-Not done, not tested:  sound; a display that holds 50 Hz; a 68k back end; real A1200 hardware; a Commodore Kickstart
+Frame rate claim:      10.6 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
+                       within 8 frames; over the whole bench game time runs at 80% of the clock. 50 Hz is not held and
+                       the stock machine does not start.
+                       Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
+                       translated game code. A model of the kit's loop over the bench's per-tick load says halving
+                       either the logic or the display brings game time to about 95%, halving both to 100%.
+                       Cheapest upgrade likely to reach full game speed: not measured.
+Not done, not tested:  sound; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
                        ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
                        pictures of the intro, 0 of 24,320 pixels differ); play by a person (controls are wired,
                        untested); scenes beyond the bench (title, menus, course intro, first hole): their code is not

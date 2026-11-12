@@ -23,3 +23,4 @@ assets/*
 src/gen_*
 src/gen68k.s
 src/ngpc/gen_*
+src/ngpc/gen68k.s

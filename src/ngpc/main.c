@@ -165,6 +165,10 @@ int main(int argc, char **argv)
                 (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
         perf_note(text);
         perf_save("bench.txt");
+#ifdef LOGIC_TRACE                      /* tools/debug_ngpc.sh: the checksum after every tick */
+        {   extern uint32_t logic_trace[]; extern unsigned logic_ntrace; BPTR fh = Open((CONST_STRPTR)"trace.bin", MODE_NEWFILE);
+            if (fh) { Write(fh, logic_trace, logic_ntrace * 4); Close(fh); } }
+#endif
 #ifdef NGP_PROF
         {   BPTR fh = Open((CONST_STRPTR)"prof.bin", MODE_NEWFILE);     /* where main and co_resume are, then the samples */
             ULONG where[2]; where[0] = (ULONG)main; where[1] = (ULONG)co_resume;
