@@ -51,12 +51,14 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 - Milestone 7 (68k back end) is `tools/back900.py`: the Amiga runs 68k assembly made from the same functions and
   liveness as the C (`BACKEND=c` in `port.conf` builds the C instead). The sound program does not run on the Amiga:
   a model of what the game sees of it does (playbook section 4).
-- Milestones 10 to 14: a correct, slow picture exists (`src/ngpc/main.c`); a fast display and sound do not.
+- Milestones 10 to 13: a correct picture exists (`src/ngpc/main.c`), not yet at 50 Hz. Milestone 14 (sound) is the
+  recorder and player of playbook section 7.
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
 Status: referee PASS as a per-pixel game with 4 MB fast RAM, 15.6 pictures a second, game time at 84% of the clock,
-checksum equal; no sound; the stock machine cannot hold the cartridge. Logic (68k back end) 27,634 colour clocks a
+checksum equal; music and effects recorded from the game's own sound program (93-98% of sounding frames as the real
+driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 27,634 colour clocks a
 tick over the bench (47% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
 model of the kit's loop fed with the bench's instructions per tick and average costs predicts 95% (measured 84%:
 the lost time is at scene changes, where heavy ticks meet full redraws, which averages hide). The previous port's
@@ -66,7 +68,7 @@ backlog is in history/llb/PIPELINE.md.
 | --- | --- | --- |
 | 1 | The display: `draw_cell`, overlay and sprite loops in assembly | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, fewer routine calls for memory that is not work RAM | logic is 47% of the machine |
-| 3 | Sound: the real driver's chip writes recorded per command on the host, played on Paula | no sound now |
+| 3 | Sound: more input scripts so the recorder sees every song and effect; stereo | commands the bench never sends are silent |
 | 4 | Passes that take more than 8 frames (scene changes): spread the cell redraws | the cause of the lost game time |
 | 5 | Trace the rest of the game (other courses, modes) | untraced code stops the port |
 | 6 | Why the profiling build does not finish 3,600 ticks | profiles of play need it |

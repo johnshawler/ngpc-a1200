@@ -1,7 +1,7 @@
 PORT REPORT
 Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World release, 2 MB cartridge, 60 Hz).
-                       Work in progress: correct, plays through the bench on the emulated A1200 with fast RAM, not yet
-                       at full speed, no sound.
+                       Work in progress: correct, plays through the bench on the emulated A1200 with fast RAM, with
+                       its music and sound effects, not yet at full speed.
 Class and route:       Binary TLCS-900/H code. The Step 1 table has no row for this CPU; the route is the one of its row
                        "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on the host
                        (tools/recomp900.py) to C, entry points found by tracing the game on a reference machine
@@ -20,33 +20,38 @@ Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colour
                        them are converted into it.
 Busiest moment:        play (ball flight and course views: both scroll planes, sprites, new picture every frame). Not
                        a Step 2 sum: the reference machine measures 1,700-3,900 main-CPU instructions a frame there
-                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 27,634
-                       colour clocks a tick over the bench, a picture 181,138 to draw and 71,372 to convert.
-Cut from the original: sound (nothing plays: the model answers the game, it makes no music); saved games (flash writes
+                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 28,767
+                       colour clocks a tick over the bench, a picture 185,858 to draw and 73,906 to convert.
+Cut from the original: the Z80 itself: its music and effects are recordings of the game's own sound program made on the
+                       host per command (tools/sndrec_ngpc.c), mixed and played on Paula; stereo is folded to one
+                       side per voice; commands the bench never sends play nothing; saved games (flash writes
                        are accepted and forgotten); the serial link; the date (fixed). Raster effects: not modelled, and
                        not seen used by this game in the bench (it takes the vertical blank interrupt only).
 Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cannot load rom.bin: file missing, or not
                        enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
                        (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
 With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
-                       frames=1111 late=2439 worst_cck=2195338 avg_cck=182668 budget_cck=71051 worst_pct=3089 avg_pct=257 display_hz=50 shown_fps=15.6
-                       ticks=3600 checksum=ac36a76c game_speed=84%
-                       logic_cck=27628 max=658496 pics=381/464 draw_cck=181138 conv_cck=71372
-                       PASS (per-pixel game: 15.6 pictures a second, game time at 84% of the clock: it falls behind where
-                       a pass takes more than 8 frames)
+                       frames=1095 late=2514 worst_cck=2246809 avg_cck=189750 budget_cck=71051 worst_pct=3162 avg_pct=267 display_hz=50 shown_fps=15.1
+                       ticks=3600 checksum=ac36a76c game_speed=83%
+                       logic_cck=28767 max=673001 pics=373/454 draw_cck=185858 conv_cck=73906
+                       PASS (per-pixel game: 15.1 pictures a second, game time at 83% of the clock: it falls behind where
+                       a pass takes more than 8 frames). With sound playing; without it the same bench gave 15.6 and
+                       84%.
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
                        the real sound program as the game sees it after every one of 3,600 ticks
                        (tools/check_sound_ngpc.sh), and the renderers equal the reference renderer after every tick
-                       (host_test -k).
-Frame rate claim:      15.6 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
-                       within 8 frames; over the whole bench game time runs at 84% of the clock. 50 Hz is not held and
+                       (host_test -k). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
+                       where it sounds hold the same note and volume as the real sound program within 3 frames and one
+                       volume step, 80-92% exactly for the tones (tools/check_music_ngpc.sh, 3,600 ticks).
+Frame rate claim:      15.1 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
+                       within 8 frames; over the whole bench game time runs at 83% of the clock. 50 Hz is not held and
                        the stock machine does not start.
                        Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
                        translated game code. Game time is lost in the passes over 8 frames: scene changes, where
                        the heaviest ticks (up to 17,000 main-CPU instructions) meet pictures with most cells redrawn.
                        Cheapest upgrade likely to reach full game speed: not measured.
-Not done, not tested:  sound; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
+Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
                        ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
                        pictures of the intro, 0 of 24,320 pixels differ); play by a person (controls are wired,
                        untested); scenes beyond the bench (title, menus, course intro, first hole): their code is not
@@ -54,6 +59,6 @@ Not done, not tested:  sound; a display that holds 50 Hz; real A1200 hardware; a
                        (it did not finish 3,600); CI (the images cannot be committed to this public repository).
 How to run:            put the cartridge image at original/ntm.ngc and, if you have it, the BIOS image at
                        original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
-                       dist/rom.bin and dist/font.bin to an Amiga with fast RAM and run "ntm" from a Shell ("ntm bench
+                       dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a Shell ("ntm bench
                        3600" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor
                        keys = pad, X = A, Z = B, Space or Return = Option, Esc = quit.

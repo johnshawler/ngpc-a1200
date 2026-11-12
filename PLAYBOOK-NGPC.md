@@ -25,6 +25,7 @@ What a finished port still needs is in section 8: a faster display, somewhat fas
 | Port machine and frame model | `src/ngpc/ngp.{c,h}` (with the sound processor's model), `src/ngpc/gen900.h` (what the generated code is written in), `src/ngpc/logic.{c,h}`, `src/ngpc/run_c.c`, `src/coro.{h,s}`, `src/coro_host.c` | use; a game with another sound driver needs its own model (section 4) |
 | Proof | `src/ngpc/run_interp.c`, `src/ngpc/host_test.c` (`-k` checks the renderers), `tools/verify_ngpc.sh`, `tools/check_sound_ngpc.sh` | use as is |
 | Amiga side | `src/ngpc/main.c` (kit skeleton, the picture at 1:1 in a black border), `src/ngpc/k2ge.c` (`k2ge_frame_cached`) | use; a faster display is section 7 |
+| Sound | `src/ngpc/psg.{c,h}` (the T6W28's registers), `tools/sndrec_ngpc.c` (records the game's own sound program per command, host), `src/ngpc/sndplay.{c,h}` (plays and mixes the recordings, host and Amiga), `src/ngpc/sound_ngp.c` (Paula), `tools/psgtrace_ngpc.c` and `tools/check_music_ngpc.sh` (how close it is) | use; a game with another driver may need other rules in `sndplay.c` (section 7) |
 | Measuring on the Amiga | `tools/prof_ngpc.sh` (1 kHz profiler, names static functions too), `tools/long_bench.sh` | use as is |
 | Starting a port | `tools/new_port_ngpc.sh`, `tools/make_assets_ngpc.sh`, `port.ngpc.conf`, `skills/amiga-ngpc-port/SKILL.md` | run once / install once |
 | Per game | `tools/games/<game>.py`, `game_bench_input` in `src/ngpc/logic.c`, the flow files `tools/flow_ngpc/<game>_*.txt`, `original/README.md` | write new |
@@ -242,12 +243,41 @@ dual playfield the kit does not have yet, sprites as hardware sprites clustered 
 does). Raster effects (timer 0 on horizontal blanks) need the frame model to deliver timer interrupts and the
 display to change registers down the screen: neither exists.
 
-**Sound (not done).** With the model there is no Z80 on the Amiga, so the music has to come from somewhere else.
-The route that fits the brief: run the real sound program on the host (`-DNGP_Z80_INTERP`) for each command the game
-sends, record its writes to the sound chip (`ngp_io[0xA0]`, `0xA1`) as a stream per command, convert the streams
-into something Paula plays (looped one-period waveforms per voice, as `src/sound.c` does for the NES, or samples),
-and play the stream that belongs to each command the model receives. Each voice's left and right volume must be
-folded into Paula's fixed left and right channels. DAC samples need a sample player on a Paula channel.
+**Sound: the game's own sound program, recorded.** The Z80 cannot run on the Amiga: Neo Turf Masters' driver
+averages 3,110 instructions a frame (more than the game's main CPU, 2,076), so even translated it would cost more than
+the whole logic. What it plays is recorded on the host instead and played back:
+
+- **What a command plays depends on more than the command byte.** The game copies the driver into the sound
+  processor's 4 KB at power-on, and before each new song a block of song data (0x0AB5-0x0FFF in Neo Turf Masters),
+  then restarts the driver (0xFF) and sends the command (often 0x03). A recording is keyed by the command and a hash of
+  the 4 KB at that moment (`sound_key`). The model in `ngp.c` hands every command to `ngp_snd_hook`.
+- **The recorder** (`tools/sndrec_ngpc.c`, run by `tools/make_assets_ngpc.sh`) plays the bench with the model as the
+  Amiga does and collects the keys; for each one it starts the real program on a private Z80 from that 4 KB, sends
+  the command, gives timer interrupts at the game's rate (about 245 Hz) and takes the sound chip's state 50 times a
+  second. It stops where the driver's state repeats (the music's loop: the stream loops there) or where it goes quiet
+  for good (an effect ends). The state never repeats byte for byte: tempo and envelope accumulators (0x00D5,
+  0x00D6, 0x0680, 0x06A2 ...) run on; bytes that change at more than half the interrupts are left out of the
+  comparison, and a repeat must be at least 2 s apart. Neo Turf Masters' songs loop after 17-44 s; the bench's
+  13 keys take 19.6 KB.
+- **The chip keeps its registers across driver restarts.** A stream holds only the bytes the program wrote; the
+  others stay as the chip had them (the noise period of one song is used by the next).
+- **Mixing** (`src/ngpc/sndplay.c`, the same code on the host and the Amiga): music (a stream that loops, lasts over
+  3 s or uses three voices) and effects; an effect covers the music on its voices, and when it ends that voice
+  stays silent until the music's next note there, as SNK's driver does. A command that sounds nothing by itself is
+  replayed over the music the game played when it sent it: Neo Turf Masters' 0x01 stops everything, 0xC8 fades
+  everything out over 89 frames.
+- **Paula** (`src/ngpc/sound_ngp.c`): at every vertical blank (the kit's `sys_vbl_hook`) one frame of state; a
+  two-sample square for each tone (Paula period = 18.47 x the T6W28 period), the T6W28's own 15-bit noise sequences
+  for the noise (36.94 x its period), the louder of each voice's left and right volume (the T6W28 volume steps are
+  Paula's 64, 50, 39, ... 0), tones 0 and noise on the left, tones 1 and 2 on the right.
+- **How close**: `tools/check_music_ngpc.sh` runs the bench twice on the host, once through the player and once with
+  the real program on the Z80, and compares the chip state 50 times a second. Neo Turf Masters: 80-92% of the frames
+  where a tone sounds are identical, 93-98% within 3 frames and one volume step (a 245 Hz envelope sampled at 50 Hz
+  from another phase); the noise 55% and 93%. On the Amiga the sound costs about 2% of the game speed.
+- **What it cannot do**: a command the recorder never saw (a scene the bench does not reach) plays nothing; the
+  Amiga counts those (`sound_missing`). Trace more scenes into the bench input, or a second input script, and run
+  `make_assets` again. Effects that depend on what the driver was doing (a song's tempo change, an effect that
+  continues a melody) are played from a fresh driver. DAC samples (ports 0xA2/0xA3) are not played.
 
 ## 8. Not done yet (do it when a game needs it; the tools say when)
 
@@ -255,7 +285,9 @@ folded into Paula's fixed left and right channels. DAC samples need a sample pla
   bank registers in memory, saves flags with `move.w ccr,d3` after every instruction whose flags are read, and
   steps `DIV`, `LDF`, `CPIR` and a few `PUSH`/`POP`/`EX` forms (25 sites in Neo Turf Masters, none hot). The next
   gains: flags left in the CCR until they are needed, the display (below) before any of it.
-- **Speed of the display** (section 7), and **sound** (section 7).
+- **Speed of the display** (section 7).
+- **Sound beyond the recordings** (section 7): commands the bench never sends are silent; stereo is folded (a
+  voice on both sides plays on one); DAC samples are not played.
 - **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data cut
   down to what it reads (the reference machine could log that; it does not yet).
 - **The profiler build hangs on long runs** (3,600 ticks with fast RAM did not finish in 15 minutes; 900 ticks
@@ -321,3 +353,10 @@ sections above if a lesson is general.
   says what to speed up: here logic and display count about equally.
 - Next time: write the 68k back end with the bank guard, static addresses and inline RAM from the start; count
   stepped executions on the host before the first Amiga run; build the loop model before choosing what to speed up.
+- Sound, same session: the game's own driver, recorded per (4 KB, command) on the host and mixed on Paula
+  (section 7). The first try keyed recordings by the command byte alone and failed at once: the same command 0x03
+  played four different songs, because the game uploads each song's data before it. Two driver habits had to be
+  copied into the mixer before the comparison with the real driver reached 93-98%: a voice an effect used stays
+  silent until the music's next note, and chip registers survive a driver restart.
+- Next time: compare with the real thing from the first stream (`tools/check_music_ngpc.sh`); every rule in the
+  mixer came from a difference it showed.

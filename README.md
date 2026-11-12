@@ -33,7 +33,7 @@ once, on the host, and prove the translation against an interpreter tick by tick
 | Console | Start here | State |
 | --- | --- | --- |
 | NES / Famicom (6502) | `KICKOFF.md`, `PLAYBOOK-NES.md`, `tools/new_port.sh` | one port made: Little League Baseball (`history/llb/REPORT.txt`) |
-| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | Neo Turf Masters in progress (`REPORT.txt`): correct on the emulated Amiga, not yet fast, no sound |
+| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | Neo Turf Masters in progress (`REPORT.txt`): correct on the emulated Amiga with fast RAM, music and effects from its own sound program, game time at 83% of the clock |
 
 ## What is here
 
@@ -47,7 +47,8 @@ once, on the host, and prove the translation against an interpreter tick by tick
 | `tools/port.sh`, `check_gates.py`, `port.conf` | The referee: build, bench, host test, gates |
 | `tools/check_kit.sh`, `tools/kit.sha256`, `KIT_VERSION` | Proof that the kit is unchanged |
 | `examples/` | Four small programs built on the kit: scrolling, still screen, per-pixel, sound |
-| `tools/ngpref/`, `tools/tlcs900.py`, `tools/recomp900.py`, `src/ngpc/` | Neo Geo Pocket Color: reference machine, CPU tables, translator, the port's machine layer and frame model |
+| `tools/ngpref/`, `tools/tlcs900.py`, `tools/recomp900.py`, `tools/back900.py`, `src/ngpc/` | Neo Geo Pocket Color: reference machine, CPU tables, translator with its 68k back end, the port's machine layer and frame model |
+| `tools/sndrec_ngpc.c`, `src/ngpc/psg.c`, `src/ngpc/sndplay.c`, `src/ngpc/sound_ngp.c` | Neo Geo Pocket Color sound: the game's own sound program recorded per command on the host, mixed and played on Paula |
 | `tools/nesref/`, `tools/recomp.py`, `tools/back68k.py`, `src/*.c` | NES: reference machine, translator with a 68k back end, the Little League Baseball port |
 | `samples/` | Three small PC games for trying a model out |
 | `original/`, `src/`, `assets/`, `dist/` | The game to port, the port's code, its converted data, the built program |

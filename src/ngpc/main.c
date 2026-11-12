@@ -8,6 +8,8 @@
  * screen. It draws the picture from the K2GE's memory (k2ge_frame_cached: the 256 palette entries are the 256 pens of
  * an 8-plane screen) and converts it with the kit's chunky-to-planar routine, row by row. It draws a new picture only
  * when the game changed the K2GE's memory; a change of colours alone only reloads the palette.
+ * Sound: the streams tools/sndrec_ngpc.c recorded from the game's own sound program (dist/sound.bin), played on
+ * Paula at every vertical blank (src/ngpc/sound_ngp.c). Without sound.bin the game is silent.
  */
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -21,6 +23,7 @@
 #include "ngp.h"
 #include "logic.h"
 #include "k2ge.h"
+#include "sound_ngp.h"
 
 #undef TICKS_PER_SECOND                 /* <proto/dos.h> has its own */
 #define TICKS_PER_SECOND 60             /* the Neo Geo Pocket shows 60 frames a second: 6 ticks every 5 frames */
@@ -57,7 +60,7 @@ static int game_load(void)
     if (!rom) { printf("cannot load rom.bin: file missing, or not enough memory for %s\n", "the cartridge"); return 0; }
     chunky = sys_alloc(K2GE_W * K2GE_H_LINES, MEMF_ANY | MEMF_CLEAR);
     rgb_of = sys_alloc(4096 * 4, MEMF_ANY);
-    if (!chunky || !rgb_of) return 0;
+    if (!chunky || !rgb_of || !sound_load()) return 0;
     {   ULONG c;
         for (c = 0; c < 4096; c++) rgb_of[c] = ((c & 15) * 17 << 16) | (((c >> 4) & 15) * 17 << 8) | ((c >> 8) & 15) * 17;
     }
@@ -72,7 +75,10 @@ static void game_start(void)
     prof_install();
 #endif
     ngp_pal_dirty = 1;
+    sound_start();
 }
+
+static void vbl(void) { sys_key_poll(); sound_vbl(); }     /* every vertical blank: keys, then a frame of sound */
 
 /* joystick in port 2 = pad, fire = A, second fire = B. Keys: cursor keys, X = A, Z = B, Space or Return = Option */
 static UWORD read_input(void)
@@ -130,7 +136,7 @@ int main(int argc, char **argv)
     if (disp_plane != 320 * 256 / 8) { printf("the display is not the one the C2P routine was assembled for\n"); disp_close(); sys_free_all(); return 20; }
     sys_force_pal = 1;                                          /* NTSC machine: run the picture at 50 Hz */
     if (!sys_take()) { disp_close(); sys_free_all(); return 20; }
-    sys_vbl_hook = sys_key_poll;                                /* keys are read at every vertical blank */
+    sys_vbl_hook = vbl;                                         /* keys and sound at every vertical blank */
     hz = sys_is_pal ? 50 : 60;
     disp_palette(palette, 0, 256);
     disp_on();
@@ -161,6 +167,8 @@ int main(int argc, char **argv)
 #ifdef NGP_PROF
     prof_remove();
 #endif
+    sys_vbl_hook = 0;
+    sound_stop();
     sys_give();
     disp_close();
     sys_free_all();
@@ -173,6 +181,9 @@ int main(int argc, char **argv)
                 (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
         perf_note(text);
         perf_save("bench.txt");
+#ifdef SOUND_TRACE
+        { extern void sound_trace_save(void); sound_trace_save(); }
+#endif
 #ifdef LOGIC_TRACE                      /* tools/debug_ngpc.sh: the checksum after every tick */
         {   extern uint32_t logic_trace[]; extern unsigned logic_ntrace; BPTR fh = Open((CONST_STRPTR)"trace.bin", MODE_NEWFILE);
             if (fh) { Write(fh, logic_trace, logic_ntrace * 4); Close(fh); } }

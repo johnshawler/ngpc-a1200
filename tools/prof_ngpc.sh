@@ -21,7 +21,7 @@ for f in '"$SOURCES src/prof68k.s"'; do
   OBJS="$OBJS $o"
 done
 m68k-amigaos-gcc -m68020 -noixemul $OBJS -o dist/'"$EXE"' -Wl,-Map=dist/'"$EXE"'.map'
-rm -rf "$OUT"; mkdir -p "$OUT/S"; cp "dist/$EXE" dist/rom.bin "$OUT/"; [ -f dist/font.bin ] && cp dist/font.bin "$OUT/"
+rm -rf "$OUT"; mkdir -p "$OUT/S"; cp "dist/$EXE" dist/rom.bin "$OUT/"; [ -f dist/font.bin ] && cp dist/font.bin "$OUT/"; [ -f dist/sound.bin ] && cp dist/sound.bin "$OUT/"
 printf '%s bench %s\n' "$EXE" "$N" > "$OUT/S/startup-sequence"
 UAE_DONE="$OUT/bench.txt" tools/run_uae.sh "$OUT" "$SECS" - "$@"
 cat "$OUT/bench.txt" 2>/dev/null || { echo "no bench.txt"; exit 1; }

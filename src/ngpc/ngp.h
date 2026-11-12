@@ -28,6 +28,14 @@ static inline void ngp_vidw(uint32_t o, uint8_t v)
     if (o >= 0x2000) { ngp_dirty.chr[(o - 0x2000) >> 4] = 1; ngp_dirty.any = 1; }
     else if (o >= 0x1000) { ngp_dirty.cell[(o - 0x1000) >> 1] = 1; ngp_dirty.any = 1; }
 }
+#ifndef NGP_Z80_INTERP
+extern void (*ngp_snd_hook)(uint8_t cmd);       /* the driver model calls it with every command the game sends */
+#endif
+int32_t ngp_snd_period(void);                   /* T-states between the sound processor's timer interrupts now, 0 = none */
+#ifdef NGP_Z80_INTERP
+extern void (*ngp_psg_hook)(unsigned port, uint8_t v);  /* host tools: every write to the sound chip (0 = right, 1 = left) */
+extern uint32_t ngp_z80_irqs;                           /* the sound program's timer interrupts so far */
+#endif
 extern uint32_t ngp_z80_steps, ngp_cpu_steps;   /* instructions run so far: the sound program; the main CPU (interpreter only) */
 
 extern const uint8_t ngp_even[256];     /* 1 = an even number of bits set */

@@ -75,16 +75,19 @@ static void snd_time(int32_t t)                         /* t T-states pass: the 
     }
 }
 void ngp_z80_frame(void) { snd_time(515 * 199 / 2); }
+int32_t ngp_snd_period(void) { return snd_irq_period(); }
 void ngp_z80_slice(void) { snd_time(256); }
 
 #ifdef NGP_Z80_INTERP
+void (*ngp_psg_hook)(unsigned port, uint8_t v);  /* host tools: every write to the sound chip (0 = right, 1 = left) */
+uint32_t ngp_z80_irqs;                          /* timer interrupts the sound program has taken */
 static uint8_t z80_wrote;
 static uint8_t z80_mr(uint16_t a) { return a < 0x1000 ? ngp_ram[0x3000 + a] : a == 0x8000 ? ngp_io[0xbc] : 0xff; }
 static void z80_mw(uint16_t a, uint8_t v)
 {
     z80_wrote = 1;
     if (a < 0x1000) ngp_ram[0x3000 + a] = v;
-    else if (a == 0x4000 || a == 0x4001) ngp_io[0xa0 + (a & 1)] = v;      /* the sound chip */
+    else if (a == 0x4000 || a == 0x4001) { ngp_io[0xa0 + (a & 1)] = v; if (ngp_psg_hook) ngp_psg_hook(a & 1, v); }  /* the sound chip */
     else if (a == 0x8000) ngp_io[0xbc] = v;
     else if (a == 0xc000) ipend[6] = 1;                                   /* interrupt to the main CPU */
 }
@@ -116,7 +119,7 @@ static void z80_settle(void)
 }
 static void snd_start(void) { z80_reset(); z80_settle(); }
 static void snd_nmi(void) { z80_settle(); z80.nmi_pending = 1; z80_settle(); }
-static void snd_irq(void) { z80.irq_line = 1; z80_settle(); }
+static void snd_irq(void) { ngp_z80_irqs++; z80.irq_line = 1; z80_settle(); }
 #else
 /* SNK's sound driver, as the main CPU can see it (read from Neo Turf Masters' sound program, Z80 addresses):
  *  - started, it clears its variables (0x00C0-0x01E5, its tick counter at 0x00DE among them), zeroes its interrupt
@@ -127,9 +130,11 @@ static void snd_irq(void) { z80.irq_line = 1; z80_settle(); }
  * Nothing else it does is read by the main CPU (tools/ngpref -m lists what the main CPU reads). */
 static uint8_t snd_tick;
 static void snd_start(void) { snd_tick = 0; ngp_ram[0x70de - 0x4000] = 0; ipend[6] = 1; }
+void (*ngp_snd_hook)(uint8_t cmd);              /* sees every command (the recorder on the host, the player on the Amiga) */
 static void snd_nmi(void)
 {
     uint8_t c = ngp_io[0xbc];
+    if (ngp_snd_hook) ngp_snd_hook(c);
     ngp_io[0xbc] = (uint8_t)~c;
     if (c == 0xff) snd_start();
 }

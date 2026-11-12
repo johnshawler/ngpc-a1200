@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 OUT="$1"; N="$2"; SECS="${3:-900}"; shift 3 2>/dev/null || shift $#
 EXE=${NAME}_dbg
 CFLAGS="$CFLAGS -DLOGIC_TRACE=$N" tools/build.sh "dist/$EXE" $SOURCES > /dev/null
-rm -rf "$OUT"; mkdir -p "$OUT/S"; cp "dist/$EXE" dist/rom.bin "$OUT/"; [ -f dist/font.bin ] && cp dist/font.bin "$OUT/"
+rm -rf "$OUT"; mkdir -p "$OUT/S"; cp "dist/$EXE" dist/rom.bin "$OUT/"; [ -f dist/font.bin ] && cp dist/font.bin "$OUT/"; [ -f dist/sound.bin ] && cp dist/sound.bin "$OUT/"
 printf '%s bench %s\n' "$EXE" "$N" > "$OUT/S/startup-sequence"
 UAE_DONE="$OUT/bench.txt" tools/run_uae.sh "$OUT" "$SECS" "$OUT/shot.png" "$@"
 cat "$OUT/bench.txt" 2>/dev/null || echo "no bench.txt"
