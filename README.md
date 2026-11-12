@@ -33,7 +33,7 @@ once, on the host, and prove the translation against an interpreter tick by tick
 | Console | Start here | State |
 | --- | --- | --- |
 | NES / Famicom (6502) | `KICKOFF.md`, `PLAYBOOK-NES.md`, `tools/new_port.sh` | one port made: Little League Baseball (`history/llb/REPORT.txt`) |
-| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | Neo Turf Masters in progress (`REPORT.txt`): correct on the emulated Amiga with fast RAM, music and effects from its own sound program, game time at 94% of the clock |
+| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | Neo Turf Masters in progress (`REPORT.txt`): correct on the emulated Amiga with fast RAM, music and effects from its own sound program, game time at 95% of the clock |
 
 ## What is here
 

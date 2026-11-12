@@ -56,9 +56,9 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: referee PASS as a per-pixel game with 4 MB fast RAM, 19.3 pictures a second, game time at 94% of the clock,
+Status: referee PASS as a per-pixel game with 4 MB fast RAM, 19.5 pictures a second, game time at 95% of the clock,
 checksum equal; music and effects recorded from the game's own sound program (93-98% of sounding frames as the real
-driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 22,782 colour clocks a
+driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 22,751 colour clocks a
 tick over the bench (38% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
 model of the kit's loop fed with the bench's instructions per tick and average costs predicts 95% (measured 84%:
 the lost time is at scene changes, where heavy ticks meet full redraws, which averages hide). The previous port's

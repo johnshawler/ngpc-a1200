@@ -73,7 +73,21 @@ uint32_t asm_ldir(uint32_t dst, uint32_t src, uint32_t n, int32_t step)
     if (step > 0 && bytes <= 0x3800u && dst - 0x8800u <= 0x3800u - bytes) {
         const uint8_t *s = src - 0x200000u <= 0x200000u - bytes ? ngp_rom + (src - 0x200000)
                          : bytes <= 0x4000u && src - 0x4000u <= 0x4000u - bytes ? ngp_ram + (src - 0x4000) : 0;
-        if (s) { for (i = 0; i < bytes; i++) ngp_vidw(dst - 0x8000 + i, s[i]); return bytes; }
+        if (s) {                                /* whole characters (16 bytes) as longs; the rest as ngp_vidw does */
+            uint32_t o = dst - 0x8000, end = o + bytes;
+            while (o < end) {
+                if (o >= 0x2000 && !(o & 15) && end - o >= 16) {
+                    uint32_t *d = (uint32_t *)(void *)(ngp_vid + o);
+                    const uint32_t *q = (const uint32_t *)(const void *)s;
+                    if (d[0] != q[0] || d[1] != q[1] || d[2] != q[2] || d[3] != q[3]) {
+                        d[0] = q[0]; d[1] = q[1]; d[2] = q[2]; d[3] = q[3];
+                        ngp_vid_gen++; ngp_dirty.chr[(o - 0x2000) >> 4] = 1; ngp_dirty.any = 1;
+                    }
+                    o += 16; s += 16;
+                } else { ngp_vidw(o, *s); o++; s++; }
+            }
+            return bytes;
+        }
     }
     if (size == 1) for (i = 0; i < n; i++) { WR8(dst, RD8(src)); dst += (uint32_t)step; src += (uint32_t)step; }
     else for (i = 0; i < n; i++) { WR16(dst, RD16(src)); dst += (uint32_t)step; src += (uint32_t)step; }

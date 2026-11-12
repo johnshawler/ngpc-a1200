@@ -12,8 +12,8 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, with its music and effects, and the referee passes it as a per-pixel game (19.3 pictures a second, game
-time at 94% of the clock).
+a black border, with its music and effects, and the referee passes it as a per-pixel game (19.5 pictures a second, game
+time at 95% of the clock).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -173,7 +173,8 @@ whose C side is `src/ngpc/run68k.c`). The same functions, the same liveness, the
   tick, compared with `host_test N -V`). A profiling build exports every function's label (`-DNGP_PROF` for vasm),
   so `tools/prof_ngpc.sh` names `F_<address>` and the runtime routines.
 - **Block copies are one call** (`asm_ldir` in `run68k.c`): the whole block, straight from the cartridge or RAM into
-  maps, sprites and characters, element by element for anything else. A game's scene changes are mostly such
+  maps, sprites and characters (whole characters compared and copied as four longs), element by element for anything
+  else. libnix's `memcmp` and `memcpy` were slower than that on 16 bytes. A game's scene changes are mostly such
   uploads: Neo Turf Masters' heaviest ticks copy 2,500 words into character memory with one `LDIRW`.
 - **Count the step by executions, not by sites.** 50 executions a tick of four stepped `LD XWA2,#imm` cost a third
   of the logic: each step writes out and reads back every register and decodes in C. A host build of the
