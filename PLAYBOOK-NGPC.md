@@ -13,7 +13,7 @@ State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, 
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
 a black border, with its music and effects, and the referee passes it as a per-pixel game (19.3 pictures a second, game
-time at 93% of the clock).
+time at 94% of the clock).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -241,6 +241,9 @@ plane buffer row keeps a bit per cell column for "all opaque" and "all see-throu
 an empty front plane is skipped. `k2ge_line_gen[]` counts the writes of each line, so `main.c` converts into a screen
 buffer only the rows written since that buffer got them. In Neo Turf Masters characters change in 90% of the
 pictures (about 46 each, so 90-170 cells are redrawn), which is now the largest part of a picture (`draw_cell`).
+Only cells the 160 x 152 view shows are redrawn; a changed cell outside it is kept in a bit mask per cell row and
+drawn when it scrolls in (a plane is 32 x 32 cells, the view about 21 x 20). At a scene change that halves the
+redraw: the worst pass of the bench went from 1.71 to 1.31 million colour clocks.
 
 **Game time against pictures.** The kit's loop gives a pass at most 8 frames of game time; a pass whose ticks are
 heavy and that also draws a picture goes over and loses the rest. `game_draw` (ours, not the loop) skips the new

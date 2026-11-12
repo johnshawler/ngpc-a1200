@@ -241,23 +241,65 @@ static void overlay(uint8_t *out, const uint8_t *src, unsigned bit)
     }
 }
 
-/* bring the plane buffers up to date (the cells and characters the game changed); 1 if characters changed */
+/* the 32 x 32 cells of a plane the 160 x 152 view shows now: one bit per cell column, one per cell row */
+static void view_cells(const uint8_t *v, int which, uint32_t *cols, uint32_t *rows)
+{
+    unsigned sx = v[which ? 0x34 : 0x32], sy = v[which ? 0x35 : 0x33], k;
+    *cols = *rows = 0;
+    for (k = 0; k <= K2GE_W / 8; k++) *cols |= 1u << (((sx >> 3) + k) & 31);
+    for (k = 0; k <= K2GE_H_LINES / 8; k++) *rows |= 1u << (((sy >> 3) + k) & 31);
+}
+
+/* changed cells outside the view, drawn when they scroll in: per plane and cell row, one bit per cell column */
+static uint32_t later[2][32];
+static int later_any;
+
+static void mark(unsigned c, const uint32_t *cols, const uint32_t *rows, const uint8_t *v)
+{
+    unsigned w = c >> 10, cell = c & 1023;
+    if ((cols[w] >> (cell & 31) & 1) && (rows[w] >> (cell >> 5) & 1)) draw_cell(v, (int)w, cell);
+    else { later[w][cell >> 5] |= 1u << (cell & 31); later_any = 1; }
+}
+
+/* bring the plane buffers up to date where the view shows them: the cells the game changed and those showing a
+   changed character, and the ones left for later that the view shows now. 1 if characters changed. */
 static NOINLINE int update_planes(const uint8_t *v, K2geDirty *d)
 {
-    unsigned c;
+    unsigned c, w, r;
     int chr_any = 0;
-    for (c = 0; c < 512; c += 4) if (L4(d->chr + c)) { chr_any = 1; break; }
-    if (chr_any) {                              /* characters changed: every cell that shows one of them */
-        const uint8_t *m = v + 0x1000, *ch = d->chr;
-        uint8_t *cl = d->cell;
-        for (c = 0; c < 2048; c++, m += 2)
-            if (cl[c] | ch[m[0] | (m[1] & 1) << 8]) { draw_cell(v, c >> 10, c & 1023); cl[c] = 0; }
-        memset(d->chr, 0, sizeof d->chr);
-    } else {                                    /* only cells: four flags at a time */
-        for (c = 0; c < 2048; c += 4)
-            if (L4(d->cell + c)) { unsigned k; for (k = c; k < c + 4; k++) if (d->cell[k]) { draw_cell(v, k >> 10, k & 1023); d->cell[k] = 0; } }
+    uint32_t cols[2], rows[2];
+    view_cells(v, 0, &cols[0], &rows[0]); view_cells(v, 1, &cols[1], &rows[1]);
+    if (d->any) {
+        for (c = 0; c < 512; c += 4) if (L4(d->chr + c)) { chr_any = 1; break; }
+        if (chr_any) {                          /* characters changed: every cell that shows one of them */
+            const uint8_t *m = v + 0x1000, *ch = d->chr;
+            uint8_t *cl = d->cell;
+            for (c = 0; c < 2048; c++, m += 2)
+                if (cl[c] | ch[m[0] | (m[1] & 1) << 8]) { cl[c] = 0; mark(c, cols, rows, v); }
+            memset(d->chr, 0, sizeof d->chr);
+        } else {                                /* only cells: four flags at a time */
+            for (c = 0; c < 2048; c += 4)
+                if (L4(d->cell + c)) { unsigned k; for (k = c; k < c + 4; k++) if (d->cell[k]) { d->cell[k] = 0; mark(k, cols, rows, v); } }
+        }
+        d->any = 0;
     }
-    d->any = 0;
+    if (later_any) {                            /* those left for later that are in view now */
+        later_any = 0;
+        for (w = 0; w < 2; w++)
+            for (r = 0; r < 32; r++) {
+                uint32_t b = later[w][r];
+                if (!b) continue;
+                if (rows[w] >> r & 1) {
+                    uint32_t now = b & cols[w];
+                    if (now) {
+                        unsigned x;
+                        for (x = 0; x < 32; x++) if (now >> x & 1) draw_cell(v, (int)w, r * 32 + x);
+                        b &= ~now; later[w][r] = b;
+                    }
+                }
+                if (b) later_any = 1;
+            }
+    }
     return chr_any;
 }
 
@@ -309,7 +351,7 @@ void k2ge_frame_cached(const uint8_t *v, K2geDirty *d, uint8_t *out)
             for (k = 0; k < n; k++) need[c] |= 1u << (((c >> 3) + k) & 31);
         }
     }
-    if (d->any) chr_any = update_planes(v, d);
+    if (d->any || later_any) chr_any = update_planes(v, d);
     regs[0] = v[2]; regs[1] = v[3]; regs[2] = v[4]; regs[3] = v[5]; regs[4] = v[0x12]; regs[5] = v[0x118];
     regs[6] = v[0x30] & 0x80; regs[7] = v[0x32]; regs[8] = v[0x33]; regs[9] = v[0x34]; regs[10] = v[0x35];
     all = !last_ok || out != last_out || memcmp(regs, last_regs, sizeof regs);   /* every line, or only those that changed */
