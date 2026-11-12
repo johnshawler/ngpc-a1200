@@ -86,7 +86,8 @@ static void game_start(void)
 
 static void vbl(void) { sys_key_poll(); sound_vbl(); }     /* every vertical blank: keys, then a frame of sound */
 
-/* joystick in port 2 = pad, fire = A, second fire = B. Keys: cursor keys, X = A, Z = B, Space or Return = Option */
+/* The controls of every Neo Geo Pocket port (PLAYBOOK-NGPC.md section 7): joystick in port 2 = pad; button 1 (A) =
+   joystick button 1 (fire) and Z; button 2 (B) = joystick button 2 (second fire) and X; Option = Space or Return */
 static UWORD read_input(void)
 {
     UWORD in = sys_joy(1);
@@ -94,8 +95,8 @@ static UWORD read_input(void)
     if (sys_keys[KEY_DOWN]) in |= IN_DOWN;
     if (sys_keys[KEY_LEFT]) in |= IN_LEFT;
     if (sys_keys[KEY_RIGHT]) in |= IN_RIGHT;
-    if (sys_keys[0x32]) in |= IN_A;
-    if (sys_keys[0x31]) in |= IN_B;
+    if (sys_keys[0x31]) in |= IN_A;             /* Z */
+    if (sys_keys[0x32]) in |= IN_B;             /* X */
     if (sys_keys[KEY_SPACE] || sys_keys[KEY_RET]) in |= IN_OPTION;
     return in;
 }

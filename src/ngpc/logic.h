@@ -8,8 +8,8 @@
 #define IN_LEFT   2
 #define IN_DOWN   4
 #define IN_UP     8
-#define IN_A      16            /* fire */
-#define IN_B      32            /* second fire */
+#define IN_A      16            /* button 1: joystick button 1 (JOY_FIRE) or Z */
+#define IN_B      32            /* button 2: joystick button 2 (JOY_FIRE2) or X */
 #define IN_OPTION 64
 
 void game_init(const uint8_t *rom, uint32_t len, const uint8_t *font);  /* before the first tick */

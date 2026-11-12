@@ -67,5 +67,6 @@ Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a
 How to run:            put the cartridge image at original/ntm.ngc and, if you have it, the BIOS image at
                        original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
                        dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a
-                       Shell ("ntm bench 3600" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor
-                       keys = pad, X = A, Z = B, Space or Return = Option, Esc = quit.
+                       Shell ("ntm bench 3600" for the proof run). Joystick in port 2: stick = pad, button 1 (fire) =
+                       NGPC button 1 (A), button 2 = NGPC button 2 (B). Keys: cursor keys = pad, Z = button 1 (A),
+                       X = button 2 (B), Space or Return = Option, Esc = quit.

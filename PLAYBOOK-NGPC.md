@@ -216,6 +216,13 @@ report from the start.
 
 ## 7. Display and sound: what exists, what to build
 
+**Controls: the same in every port** (`read_input` in `src/ngpc/main.c`, the user's rule). The Neo Geo Pocket's
+button 1 (A) is the Amiga joystick's button 1 (fire) and Z on the keyboard; its button 2 (B) is the joystick's
+button 2 (second fire) and X. The stick and the cursor keys are the pad; Space or Return is Option; Esc quits. The
+kit's `JOY_FIRE` (16) and `JOY_FIRE2` (32) are the port's `IN_A` and `IN_B`, so the joystick needs no mapping; the
+raw key codes are 0x31 for Z and 0x32 for X. A game that labels its buttons differently keeps this mapping: write
+what the buttons do in its report, not a different layout. This applies to Neo Turf Masters.
+
 **Exists: the picture at its own size in a black border** (`src/ngpc/main.c`, the user's choice for Neo Turf
 Masters; doubled it would need 304 lines, which a PAL screen does not have). 8 planes: the K2GE's 256 palette
 entries are the 256 pens, so a colour change is a palette load and nothing is redrawn. The picture is drawn into a
