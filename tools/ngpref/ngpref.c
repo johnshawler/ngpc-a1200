@@ -287,7 +287,7 @@ static void reset(void)
     int i;
     memset(&cpu, 0, sizeof cpu);
     cpu.pc = (rom[0x1c] | rom[0x1d] << 8 | rom[0x1e] << 16) & 0xffffff;
-    cpu.sr = 0xf800;
+    cpu.sr = 0xf800; CPU_RFP_SET();
     cpu.gpr[0] = 0xff23c3; cpu.gpr[1] = 0xff23df; cpu.gpr[2] = 0x006480; cpu.gpr[3] = 0x6c00;
     /* what the BIOS leaves in RAM and in the K2GE when it starts a game */
     for (i = 0; i < 4; i++) ram[0x6c00 - 0x4000 + i] = rom[0x1c + i];

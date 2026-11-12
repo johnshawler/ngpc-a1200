@@ -34,6 +34,7 @@
 typedef struct {
     uint32_t bank[4][4];        /* XWA, XBC, XDE, XHL of the four register banks */
     uint32_t gpr[4];            /* XIX, XIY, XIZ, XSP */
+    uint32_t *cur;              /* bank[RFP]: the current bank, kept up to date at every change of RFP (CPU_RFP_SET) */
     uint32_t pc;
     uint16_t sr;                /* 15 SYSM, 14-12 IFF, 11 MAX, 10-8 RFP, 7 S, 6 Z, 4 H, 2 V, 1 N, 0 C */
     uint8_t  f2;                /* F' */
@@ -51,6 +52,7 @@ static Cpu900 cpu;
 #endif
 
 #define CPU_RFP   ((cpu.sr >> 8) & 3)
+#define CPU_RFP_SET() (cpu.cur = cpu.bank[CPU_RFP])
 #define CPU_IFF   ((cpu.sr >> 12) & 7)
 #define XSP       cpu.gpr[3]
 static const uint8_t cpu_code8[8] = { 0xe1, 0xe0, 0xe5, 0xe4, 0xe9, 0xe8, 0xed, 0xec };     /* W A B C D E H L */
@@ -218,7 +220,7 @@ CPU900_UNUSED static uint32_t cpu_div(int size, uint32_t val, uint32_t d, int sg
     }
 }
 
-CPU900_UNUSED static void cpu_set_sr(uint16_t v) { cpu.sr = v | 0x8800; }
+CPU900_UNUSED static void cpu_set_sr(uint16_t v) { cpu.sr = v | 0x8800; CPU_RFP_SET(); }
 
 /* Take an interrupt or a software interrupt through vector number n (the table is at 0xFFFF00). */
 CPU900_UNUSED static void cpu_vector(int n, int level)
@@ -561,8 +563,8 @@ CPU900_UNUSED static int cpu_step(void)
         case 0x09: cpu_push(1, cpu_fetch(1)); break;
         case 0x0a: { uint32_t a = cpu_fetch(1); cpu_wr(2, a, cpu_fetch(2)); break; }
         case 0x0b: cpu_push(2, cpu_fetch(2)); break;
-        case 0x0c: cpu.sr = (cpu.sr & ~0x0700) | (((CPU_RFP + 1) & 3) << 8); break;
-        case 0x0d: cpu.sr = (cpu.sr & ~0x0700) | (((CPU_RFP - 1) & 3) << 8); break;
+        case 0x0c: cpu.sr = (cpu.sr & ~0x0700) | (((CPU_RFP + 1) & 3) << 8); CPU_RFP_SET(); break;
+        case 0x0d: cpu.sr = (cpu.sr & ~0x0700) | (((CPU_RFP - 1) & 3) << 8); CPU_RFP_SET(); break;
         case 0x0e: cpu.pc = cpu_pop(4); break;
         case 0x0f: { int16_t d = (int16_t)cpu_fetch(2); cpu.pc = cpu_pop(4); XSP += d; break; }
         case 0x10: cpu.sr &= ~(F_H | F_N | F_C); break;
@@ -572,7 +574,7 @@ CPU900_UNUSED static int cpu_step(void)
         case 0x14: cpu_push(1, cpu_getr(1, 0xe0)); break;
         case 0x15: cpu_setr(1, 0xe0, cpu_pop(1)); break;
         case 0x16: { uint8_t t = cpu.sr & 0xff; cpu.sr = (cpu.sr & 0xff00) | cpu.f2; cpu.f2 = t; break; }
-        case 0x17: cpu.sr = (cpu.sr & ~0x0700) | ((cpu_fetch(1) & 3) << 8); break;
+        case 0x17: cpu.sr = (cpu.sr & ~0x0700) | ((cpu_fetch(1) & 3) << 8); CPU_RFP_SET(); break;
         case 0x18: cpu_push(1, cpu.sr & 0xff); break;
         case 0x19: cpu.sr = (cpu.sr & 0xff00) | cpu_pop(1); break;
         case 0x1a: cpu.pc = cpu_fetch(2); break;

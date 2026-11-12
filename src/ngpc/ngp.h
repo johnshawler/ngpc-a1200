@@ -18,6 +18,7 @@ extern uint32_t ngp_fatal_pc; extern int ngp_fatal_why;       /* set when the pr
 extern uint32_t ngp_frames;             /* frames (ticks) run so far */
 extern uint32_t ngp_z80_steps, ngp_cpu_steps;   /* instructions run so far: the sound program; the main CPU (interpreter only) */
 
+extern const uint8_t ngp_even[256];     /* 1 = an even number of bits set */
 uint8_t ngp_rd_slow(uint32_t a);        /* everything that is not RAM or ROM */
 void    ngp_wr_slow(uint32_t a, uint8_t v);
 

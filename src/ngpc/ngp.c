@@ -11,6 +11,16 @@ const uint8_t *ngp_rom; uint32_t ngp_rom_len; const uint8_t *ngp_font;
 uint8_t ngp_pad;
 uint32_t ngp_fatal_pc; int ngp_fatal_why;
 uint32_t ngp_frames;
+const uint8_t ngp_even[256] = {               /* 1 = an even number of bits set: the V flag of logic operations */
+    1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
+    0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
+    0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
+    1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
+    0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
+    1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
+    1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
+    0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
+};
 uint32_t ngp_z80_steps, ngp_cpu_steps;      /* instructions run: sound program (interpreter build); main CPU (interpreter) */
 
 static uint8_t ipend[16];               /* by number in the RAM vector table: 5 vertical blank, 6 Z80, 7-10 timers */
@@ -244,7 +254,7 @@ void ngp_init(const uint8_t *rom, uint32_t len, const uint8_t *font)
     memset(&cpu, 0, sizeof cpu); memset(ipend, 0, sizeof ipend);
     snd_on = 0; tff3 = 0; z80_serial = 0; snd_irq_in = 0; ngp_frames = 0; ngp_fatal_why = 0; ngp_pad = 0;
     cpu.pc = (rom[0x1c] | rom[0x1d] << 8 | rom[0x1e] << 16) & 0xffffff;
-    cpu.sr = 0xf800;
+    cpu.sr = 0xf800; CPU_RFP_SET();
     cpu.gpr[0] = 0xff23c3; cpu.gpr[1] = 0xff23df; cpu.gpr[2] = 0x006480; cpu.gpr[3] = 0x6c00;
 #define RAM(a) ngp_ram[(a) - 0x4000]
     for (i = 0; i < 4; i++) RAM(0x6c00 + i) = rom[0x1c + i];
