@@ -12,8 +12,8 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, with its music and effects, and the referee passes it as a per-pixel game (18.1 pictures a second, game
-time at 92% of the clock).
+a black border, with its music and effects, and the referee passes it as a per-pixel game (19.3 pictures a second, game
+time at 93% of the clock).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -172,6 +172,9 @@ whose C side is `src/ngpc/run68k.c`). The same functions, the same liveness, the
   and `tools/debug_ngpc.sh <dir> N` finds the first tick where they differ (a build with the checksum after every
   tick, compared with `host_test N -V`). A profiling build exports every function's label (`-DNGP_PROF` for vasm),
   so `tools/prof_ngpc.sh` names `F_<address>` and the runtime routines.
+- **Block copies are one call** (`asm_ldir` in `run68k.c`): the whole block, straight from the cartridge or RAM into
+  maps, sprites and characters, element by element for anything else. A game's scene changes are mostly such
+  uploads: Neo Turf Masters' heaviest ticks copy 2,500 words into character memory with one `LDIRW`.
 - **Count the step by executions, not by sites.** 50 executions a tick of four stepped `LD XWA2,#imm` cost a third
   of the logic: each step writes out and reads back every register and decodes in C. A host build of the
   interpreter that counts executions per address (as `run_interp.c` with a counter) finds them in seconds.
@@ -203,9 +206,10 @@ ticks of the bench; a frame has 71,051, and 60 ticks a second need 1.2 a frame):
 | ... addresses known when translating go straight to memory | 30,251 |
 | ... one pointer compare per run instead of spilling d4-d7 | 28,456 |
 | ... the work-RAM case inline at every access through a register | 26,879 |
+| ... `LDIR`/`LDDR` as one call for the whole block (`asm_ldir`: uploads into video memory directly) | 22,009 |
 
-Over the whole 3,600-tick bench, logic averages 35,184 colour clocks a tick in C and 27,634 with the 68k back end: at
-60 ticks a second that is 59% and 47% of the machine before any picture is drawn. The console's CPU does up to 16,000 instructions a frame and they are 16-
+Over the whole 3,600-tick bench, logic averages 35,184 colour clocks a tick in C and 22,782 with the 68k back end: at
+60 ticks a second that is 59% and 38% of the machine before any picture is drawn. The console's CPU does up to 16,000 instructions a frame and they are 16-
 and 32-bit instructions: it is not a slower processor than a 14 MHz 68EC020. Plan for fast RAM and say so in the
 report from the start.
 

@@ -63,4 +63,20 @@ uint32_t asm_rd32(uint32_t a) { return RD32(a); }
 void asm_wr8(uint32_t a, uint32_t v) { WR8(a, v); }
 void asm_wr16(uint32_t a, uint32_t v) { WR16(a, v); }
 void asm_wr32(uint32_t a, uint32_t v) { WR32(a, v); }
+/* LDIR, LDDR and their word forms, the whole block: n elements of |step| bytes from src to dst, dst and src moving by step.
+   Characters, maps and sprites copied from the cartridge or RAM (a game's uploads) take the direct way; everything else
+   goes element by element as the instruction does. Returns the bytes moved (the registers move by that). */
+uint32_t asm_ldir(uint32_t dst, uint32_t src, uint32_t n, int32_t step)
+{
+    uint32_t size = (uint32_t)(step < 0 ? -step : step), bytes = n * size, i;
+    dst &= 0xffffff; src &= 0xffffff;
+    if (step > 0 && bytes <= 0x3800u && dst - 0x8800u <= 0x3800u - bytes) {
+        const uint8_t *s = src - 0x200000u <= 0x200000u - bytes ? ngp_rom + (src - 0x200000)
+                         : bytes <= 0x4000u && src - 0x4000u <= 0x4000u - bytes ? ngp_ram + (src - 0x4000) : 0;
+        if (s) { for (i = 0; i < bytes; i++) ngp_vidw(dst - 0x8000 + i, s[i]); return bytes; }
+    }
+    if (size == 1) for (i = 0; i < n; i++) { WR8(dst, RD8(src)); dst += (uint32_t)step; src += (uint32_t)step; }
+    else for (i = 0; i < n; i++) { WR16(dst, RD16(src)); dst += (uint32_t)step; src += (uint32_t)step; }
+    return bytes;
+}
 uint32_t run_call(uint32_t pc) { return asm_call(pc); }

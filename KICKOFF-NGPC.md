@@ -46,7 +46,7 @@ PIPELINE.md, NOTES.md and the git log first, then carry on from the last commit"
 
 - Working now: looking at a game on the reference machine, measuring it, translating its code to C and to 68k
   assembly and proving the translation, building and running it on the emulated Amiga with a correct picture
-  (18 pictures a second for Neo Turf Masters) and the music and effects of its own sound program, recorded.
+  (19 pictures a second for Neo Turf Masters) and the music and effects of its own sound program, recorded.
 - Not there yet (PLAYBOOK-NGPC.md section 8): a display that holds 50 Hz and full game speed. The first game the
-  tools ran, Neo Turf Masters, needs fast RAM for its data alone and keeps 92% of game time.
+  tools ran, Neo Turf Masters, needs fast RAM for its data alone and keeps 93% of game time.
   A port is real work over several sessions, and the first ones will spend much of it on the tools.

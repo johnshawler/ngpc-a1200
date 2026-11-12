@@ -20,8 +20,8 @@ Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colour
                        them are converted into it.
 Busiest moment:        play (ball flight and course views: both scroll planes, sprites, new picture every frame). Not
                        a Step 2 sum: the reference machine measures 1,700-3,900 main-CPU instructions a frame there
-                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 28,756
-                       colour clocks a tick over the bench, a picture 187,437 to draw and 68,796 to convert.
+                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 22,782
+                       colour clocks a tick over the bench, a picture 181,588 to draw and 70,650 to convert.
 Cut from the original: the Z80 itself: its music and effects are recordings of the game's own sound program made on the
                        host per command (tools/sndrec_ngpc.c), mixed and played on Paula; stereo is folded to one
                        side per voice; commands the bench never sends play nothing; saved games (flash writes
@@ -31,12 +31,13 @@ Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cann
                        enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
                        (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
 With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
-                       frames=1178 late=2064 worst_cck=1713017 avg_cck=151178 budget_cck=71051 worst_pct=2410 avg_pct=212 display_hz=50 shown_fps=18.1
-                       ticks=3600 checksum=ac36a76c game_speed=92%
-                       logic_cck=28756 max=672703 pics=239/413 draw_cck=187437 conv_cck=68796
-                       PASS (per-pixel game: 18.1 pictures a second, game time at 92% of the clock: it falls behind where
+                       frames=1237 late=1957 worst_cck=1713252 avg_cck=137019 budget_cck=71051 worst_pct=2411 avg_pct=192 display_hz=50 shown_fps=19.3
+                       ticks=3600 checksum=ac36a76c game_speed=93%
+                       logic_cck=22782 max=471933 pics=289/476 draw_cck=181588 conv_cck=70650
+                       PASS (per-pixel game: 19.3 pictures a second, game time at 93% of the clock: it falls behind where
                        a pass takes more than 8 frames). With sound playing. A pass whose ticks took over 2 frames
-                       draws no new picture (at most 8 in a row); without that rule: 15.1 and 83%.
+                       draws no new picture (at most 8 in a row); without that rule (and before block copies were
+                       one call): 15.1 and 83%.
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
                        the real sound program as the game sees it after every one of 3,600 ticks
@@ -44,13 +45,13 @@ Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the transl
                        (host_test -k). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
                        where it sounds hold the same note and volume as the real sound program within 3 frames and one
                        volume step, 80-92% exactly for the tones (tools/check_music_ngpc.sh, 3,600 ticks).
-Frame rate claim:      18.1 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
-                       within 8 frames; over the whole bench game time runs at 92% of the clock. 50 Hz is not held and
+Frame rate claim:      19.3 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
+                       within 8 frames; over the whole bench game time runs at 93% of the clock. 50 Hz is not held and
                        the stock machine does not start.
                        Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
                        translated game code. Game time is lost in the passes over 8 frames: scene changes, where
                        single ticks run up to 17,000 main-CPU instructions and change 7,600 bytes of video memory
-                       (up to 672,703 colour clocks, 9.5 frames, for one tick).
+                       (up to 471,933 colour clocks, 6.6 frames, for one tick).
                        Cheapest upgrade likely to reach full game speed: not measured.
 Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
                        ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
