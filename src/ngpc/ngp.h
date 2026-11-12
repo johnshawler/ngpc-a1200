@@ -18,6 +18,16 @@ extern uint32_t ngp_fatal_pc; extern int ngp_fatal_why;       /* set when the pr
 extern uint32_t ngp_frames;             /* frames (ticks) run so far */
 extern uint32_t ngp_vid_gen;            /* +1 at every change of the K2GE's memory outside the palettes: the picture changed */
 extern uint8_t ngp_pal_dirty;           /* a palette entry or 0x8012 changed (the display clears it) */
+#include "k2ge.h"
+extern K2geDirty ngp_dirty;             /* the map cells and characters changed since the display last looked */
+/* a write to the K2GE's sprites, maps or characters (o = 0x0800-0x3FFF from 0x8000): no side effect but the picture */
+static inline void ngp_vidw(uint32_t o, uint8_t v)
+{
+    if (ngp_vid[o] == v) return;
+    ngp_vid[o] = v; ngp_vid_gen++;
+    if (o >= 0x2000) { ngp_dirty.chr[(o - 0x2000) >> 4] = 1; ngp_dirty.any = 1; }
+    else if (o >= 0x1000) { ngp_dirty.cell[(o - 0x1000) >> 1] = 1; ngp_dirty.any = 1; }
+}
 extern uint32_t ngp_z80_steps, ngp_cpu_steps;   /* instructions run so far: the sound program; the main CPU (interpreter only) */
 
 extern const uint8_t ngp_even[256];     /* 1 = an even number of bits set */

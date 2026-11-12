@@ -13,4 +13,10 @@ void k2ge_line(const uint8_t *v, int line, uint16_t *out);
 void k2ge_line_idx(const uint8_t *v, int line, uint8_t *out);
 /* All 152 lines into out (160 x 152 bytes), the same as k2ge_line_idx() line by line, several times faster. */
 void k2ge_frame_idx(const uint8_t *v, uint8_t *out);
+/* What changed in the K2GE's memory since the last cached picture: map cells (plane 1: 0-1023, plane 2: 1024-2047) and
+   characters (0-511). Whoever writes the K2GE's memory marks them (ngp.c); k2ge_frame_cached() clears them. */
+typedef struct { uint8_t cell[2048], chr[512], any; } K2geDirty;
+/* The same picture as k2ge_frame_idx(), from two 256 x 256 buffers that hold the scroll planes already drawn and are
+   brought up to date only where cells or characters changed. Much faster when little changes. */
+void k2ge_frame_cached(const uint8_t *v, K2geDirty *dirty, uint8_t *out);
 #endif

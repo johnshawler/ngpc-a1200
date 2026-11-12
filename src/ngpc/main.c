@@ -5,7 +5,7 @@
  *   game bench N     play N logic ticks from scripted input, quit, write bench.txt (the proof of speed)
  *
  * The display shows the Neo Geo Pocket's 160 x 152 picture at its own size in the middle of a black 320 x 256
- * screen. It draws the picture from the K2GE's memory (k2ge_frame_idx: the 256 palette entries are the 256 pens of
+ * screen. It draws the picture from the K2GE's memory (k2ge_frame_cached: the 256 palette entries are the 256 pens of
  * an 8-plane screen) and converts it with the kit's chunky-to-planar routine, row by row. It draws a new picture only
  * when the game changed the K2GE's memory; a change of colours alone only reloads the palette.
  */
@@ -98,7 +98,7 @@ static void game_draw(void)
     }
     if (chunky_gen != ngp_vid_gen) {           /* the game changed the picture */
         ULONG t0 = sys_now();
-        k2ge_frame_idx(ngp_vid, chunky);
+        k2ge_frame_cached(ngp_vid, &ngp_dirty, chunky);
         chunky_gen = ngp_vid_gen; pictures_drawn++; draw_cck += sys_now() - t0;
     }
     for (i = 0; i < 2 && shown[i].buf && shown[i].buf != disp_back; i++) ;

@@ -187,3 +187,98 @@ void k2ge_frame_idx(const uint8_t *v, uint8_t *out)
         if (!full) { for (x = 0; x < lo && x < K2GE_W; x++) out[x] = edge; for (x = hi + 1; x < K2GE_W; x++) out[x] = edge; }
     }
 }
+
+
+/* ---- the cached renderer ---- */
+#define PW (256 + K2GE_W)                           /* a plane buffer row: 256 pixels, then its first 160 again */
+static uint8_t pbuf[2][256 * PW];                   /* pens of the two scroll planes; 0 = see-through */
+static int pbuf_ready;
+
+static void draw_cell(const uint8_t *v, int which, unsigned cell)
+{
+    const uint8_t *map = v + (which ? 0x1800 : 0x1000);
+    unsigned e = RD16(map + cell * 2), pal = (which ? 128 : 64) + ((e >> 9) & 15) * 4, r, cx = cell & 31, cy = cell >> 5;
+    uint32_t base4 = pal * 0x01010101u;
+    const uint8_t *chr = v + 0x2000 + (e & 0x1ff) * 16;
+    int m = (e & 0x8000) ? 1 : 0;
+    for (r = 0; r < 8; r++) {
+        unsigned bits = RD16(chr + ((e & 0x4000) ? 7 - r : r) * 2), b0 = m ? bits & 0xff : bits >> 8, b1 = m ? bits >> 8 : bits & 0xff;
+        uint8_t *q = pbuf[which] + (cy * 8 + r) * PW + cx * 8;
+        uint32_t w0 = (pix_tab[m][b0] + base4) & msk_tab[m][b0], w1 = (pix_tab[m][b1] + base4) & msk_tab[m][b1];
+        L4(q) = w0; L4(q + 4) = w1;
+        if (cx < K2GE_W / 8) { L4(q + 256) = w0; L4(q + 260) = w1; }
+    }
+}
+
+/* lay the 160 pixels of a plane row over a line: its pens where they are not 0. bit: 0x40 (plane 1) or 0x80 */
+static void overlay(uint8_t *out, const uint8_t *src, unsigned bit)
+{
+    unsigned k, sh = bit == 0x40 ? 6 : 7;
+    uint32_t b4 = bit * 0x01010101u;
+    for (k = 0; k < K2GE_W; k += 4) {
+        uint32_t x = L4(src + k), m;
+        if (!x) continue;
+        m = (x & b4) >> sh; m = (m << 8) - m;       /* 0xFF in every byte that holds a pen */
+        if (m == 0xffffffffu) L4(out + k) = x;
+        else L4(out + k) = (L4(out + k) & ~m) | x;
+    }
+}
+
+void k2ge_frame_cached(const uint8_t *v, K2geDirty *d, uint8_t *out)
+{
+    static uint32_t lbl[(K2GE_W + 2 * MARGIN + 8) / 4];
+    uint8_t *lb = (uint8_t *)lbl;
+    int winx = v[2], winy = v[3], winw = v[4], winh = v[5], x, y, i;
+    int lo = winx, hi = (winx + winw < K2GE_W ? winx + winw : K2GE_W) - 1, full = lo == 0 && hi == K2GE_W - 1;
+    uint8_t edge = (uint8_t)(0xf8 + (v[0x12] & 7)), back = (uint8_t)(0xf0 + (v[0x118] & 7));
+    uint32_t back4 = back * 0x01010101u, edge4 = edge * 0x01010101u;
+    int lastx = 0, lasty = 0, backp = (v[0x30] & 0x80) ? 0 : 1;
+    unsigned c;
+    if (!tabs_ready) make_tabs();
+    if (!pbuf_ready) { for (c = 0; c < 2048; c++) d->cell[c] = 1; d->any = 1; pbuf_ready = 1; }
+    if (d->any) {                                   /* bring the plane buffers up to date */
+        for (c = 0; c < 2048; c++) {
+            unsigned e = RD16(v + 0x1000 + c * 2);
+            if (d->cell[c] || d->chr[e & 0x1ff]) { draw_cell(v, c >> 10, c & 1023); d->cell[c] = 0; }
+        }
+        for (c = 0; c < 512; c++) d->chr[c] = 0;
+        d->any = 0;
+    }
+    for (y = 0; y < K2GE_H_LINES; y++) spr_count[y] = 0;
+    for (i = 0; i < 64; i++) {                      /* where every sprite is, chains followed */
+        const uint8_t *s = v + 0x0800 + i * 4;
+        unsigned e = RD16(s);
+        int sx = s[2], sy = s[3];
+        if (e & 0x0400) sx += lastx;
+        if (e & 0x0200) sy += lasty;
+        lastx = sx; lasty = sy;
+        if (!((e >> 11) & 3)) continue;
+        sx = (sx + v[0x20]) & 255; sy += v[0x21];
+        if (sx > 248) sx -= 256;
+        if (sy > 248 && sy < 256) sy -= 256; else sy &= 255;
+        spr_x[i] = (int16_t)sx; spr_y[i] = (int16_t)sy;
+    }
+    for (i = 63; i >= 0; i--) {
+        unsigned e = RD16(v + 0x0800 + i * 4);
+        int r;
+        if (!((e >> 11) & 3)) continue;
+        for (r = 0; r < 8; r++) { int l = spr_y[i] + r; if (l >= 0 && l < K2GE_H_LINES) spr_lines[l][spr_count[l]++] = (uint8_t)i; }
+    }
+    {
+        unsigned bsx = v[backp ? 0x34 : 0x32], bsy = v[backp ? 0x35 : 0x33], fsx = v[backp ? 0x32 : 0x34], fsy = v[backp ? 0x33 : 0x35];
+        unsigned bbit = backp ? 0x80 : 0x40, fbit = backp ? 0x40 : 0x80;
+        const uint8_t *bp = pbuf[backp], *fp = pbuf[!backp];
+        for (y = 0; y < K2GE_H_LINES; y++, out += K2GE_W) {
+            uint8_t *o;
+            if (y < winy || y >= winy + winh || lo > hi) { for (x = 0; x < K2GE_W; x += 4) L4(out + x) = edge4; continue; }
+            o = spr_count[y] ? lb + MARGIN : out;   /* lines with sprites are built with room on both sides */
+            for (x = 0; x < K2GE_W; x += 4) L4(o + x) = back4;
+            if (spr_count[y]) sprites_line(v, lb, y, 1);
+            overlay(o, bp + ((y + bsy) & 255) * PW + bsx, bbit);
+            if (spr_count[y]) sprites_line(v, lb, y, 2);
+            overlay(o, fp + ((y + fsy) & 255) * PW + fsx, fbit);
+            if (spr_count[y]) { sprites_line(v, lb, y, 3); for (x = 0; x < K2GE_W; x += 4) L4(out + x) = L4(lb + MARGIN + x); }
+            if (!full) { for (x = 0; x < lo && x < K2GE_W; x++) out[x] = edge; for (x = hi + 1; x < K2GE_W; x++) out[x] = edge; }
+        }
+    }
+}

@@ -12,6 +12,7 @@ uint8_t ngp_pad;
 uint32_t ngp_fatal_pc; int ngp_fatal_why;
 uint32_t ngp_frames;
 uint32_t ngp_vid_gen; uint8_t ngp_pal_dirty;
+K2geDirty ngp_dirty;
 const uint8_t ngp_even[256] = {               /* 1 = an even number of bits set: the V flag of logic operations */
     1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
     0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
@@ -177,6 +178,7 @@ void ngp_wr_slow(uint32_t a, uint8_t v)
         if (o >= 0x200 && o < 0x400 && (o & 1)) v &= 0x0f;              /* palette: 12 bits */
         if (o == 0x7e2 && ngp_vid[0x7f0] != 0xaa) return;               /* the mode register is locked */
         if (o == 0x10 || o == 0x08 || o == 0x09) return;                /* read-only */
+        if (o - 0x800u < 0x3800u) { ngp_vidw(o, v); return; }
         if (ngp_vid[o] == v) return;
         if (o - 0x200u < 0x200u) ngp_pal_dirty = 1;                       /* a colour: the picture's pens stay */
         else { ngp_vid_gen++; if (o == 0x12) ngp_pal_dirty = 1; }         /* 0x8012: the edge pen and the negative bit */
@@ -261,6 +263,7 @@ void ngp_init(const uint8_t *rom, uint32_t len, const uint8_t *font)
     int i;
     ngp_rom = rom; ngp_rom_len = len; ngp_font = font;
     memset(ngp_ram, 0, sizeof ngp_ram); memset(ngp_vid, 0, sizeof ngp_vid); memset(ngp_io, 0, sizeof ngp_io);
+    memset(ngp_dirty.cell, 1, sizeof ngp_dirty.cell); memset(ngp_dirty.chr, 0, sizeof ngp_dirty.chr); ngp_dirty.any = 1; ngp_vid_gen++;
     memset(&cpu, 0, sizeof cpu); memset(ipend, 0, sizeof ipend);
     snd_on = 0; tff3 = 0; z80_serial = 0; snd_irq_in = 0; ngp_frames = 0; ngp_fatal_why = 0; ngp_pad = 0;
     cpu.pc = (rom[0x1c] | rom[0x1d] << 8 | rom[0x1e] << 16) & 0xffffff;

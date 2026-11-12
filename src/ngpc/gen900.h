@@ -31,7 +31,7 @@
    0x8800-0xBFFF) is written directly; a write that changes a byte marks the picture changed (ngp_vid_gen). */
 uint32_t ngp_rd16_slow(uint32_t a), ngp_rd32_slow(uint32_t a);
 void ngp_wr16_slow(uint32_t a, uint32_t v), ngp_wr32_slow(uint32_t a, uint32_t v);
-#define VIDW(o, v) do { uint8_t v_ = (uint8_t)(v); if (ngp_vid[o] != v_) { ngp_vid[o] = v_; ngp_vid_gen++; } } while (0)
+#define VIDW(o, v) ngp_vidw((o), (uint8_t)(v))
 
 static inline uint32_t RD8(uint32_t a) { return mem_r8(a & 0xffffff); }
 static inline uint32_t RD16(uint32_t a)
