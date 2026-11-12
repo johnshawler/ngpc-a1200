@@ -12,8 +12,8 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, with its music and effects, and the referee passes it as a per-pixel game (19.5 pictures a second, game
-time at 95% of the clock).
+a black border, with its music and effects, and the referee passes it as a per-pixel game (game time at 95% of the
+clock; 4.5 new pictures a second of the 13.7 the game makes; the kit's shown_fps, 19.5, counts passes).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -249,8 +249,10 @@ redraw: the worst pass of the bench went from 1.71 to 1.31 million colour clocks
 **Game time against pictures.** The kit's loop gives a pass at most 8 frames of game time; a pass whose ticks are
 heavy and that also draws a picture goes over and loses the rest. `game_draw` (ours, not the loop) skips the new
 picture in a pass whose ticks took over 2 frames, at most 8 passes in a row; the conversion still runs, so the
-screen never shows an older picture than before. Neo Turf Masters: game time from 83% to 92%, pictures a second
-from 15.1 to 18.1 (fewer pictures drawn, a shorter run). A model of the loop on the host (the instructions and video
+screen never shows an older picture than before. Neo Turf Masters: game time from 83% to 92%, new pictures drawn
+from 373 to 239 over the bench. Read `shown_fps` with care here: the kit counts passes, and a pass that draws nothing
+still shows the newest picture; the number of new pictures is `pics=` (drawn) in the bench note, and
+`host_test N` prints how many ticks changed the picture on the console (`pictures=`). A model of the loop on the host (the instructions and video
 changes per tick from the interpreter, costs from the bench) chose the rule; it predicts game time too high (it
 uses average costs) but ranks the choices right.
 

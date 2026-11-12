@@ -45,9 +45,13 @@ Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the transl
                        (host_test -k). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
                        where it sounds hold the same note and volume as the real sound program within 3 frames and one
                        volume step, 80-92% exactly for the tones (tools/check_music_ngpc.sh, 3,600 ticks).
-Frame rate claim:      19.5 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
-                       within 8 frames; over the whole bench game time runs at 95% of the clock. 50 Hz is not held and
-                       the stock machine does not start.
+Frame rate claim:      With 4 MB fast RAM: logic at 60 ticks a second where a pass stays within 8 frames; over the whole
+                       bench game time runs at 95% of the clock. Pictures: the kit's shown_fps (19.5) counts passes,
+                       each of which shows the newest picture drawn so far; new pictures drawn: 285 in 3,153 vertical
+                       blanks (63.1 s), 4.5 a second. The game changes its picture in 823 of the 3,600 ticks
+                       (host_test prints it), 13.7 a second at its 60 Hz: the Amiga shows about a third of its picture
+                       changes, every change of colours (fades) and all of its game time but 5%. 50 Hz is not held
+                       and the stock machine does not start.
                        Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
                        translated game code. Game time is lost in the passes over 8 frames: scene changes, where
                        single ticks run up to 17,000 main-CPU instructions and change 7,600 bytes of video memory

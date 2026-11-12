@@ -45,6 +45,8 @@ static void picture(const char *name)
     fclose(f);
 }
 
+static unsigned changed_pictures;
+
 int main(int argc, char **argv)
 {
     unsigned n = argc > 1 ? (unsigned)atoi(argv[1]) : 3000, t;
@@ -56,7 +58,9 @@ int main(int argc, char **argv)
     char key[32], list[4096], name[64];
     game_init(rom, (uint32_t)romlen, fontlen == 0x800 ? font : 0);
     for (t = 0; t < n; t++) {
+        uint32_t gen0 = ngp_vid_gen;
         game_tick(game_bench_input(t));
+        if (ngp_vid_gen != gen0) changed_pictures++;
         if (argc > 2 && !strcmp(argv[2], "-V")) printf("%08x\n", (unsigned)game_checksum());
         if (verbose && (t + 1) % 100 == 0) printf("tick %u checksum %08x\n", t + 1, (unsigned)game_checksum());
         if (ramlog) {
@@ -78,6 +82,7 @@ int main(int argc, char **argv)
     if (ramlog) fclose(ramlog);
     if (verbose) printf("sound program: %u instructions (%u a tick); main CPU: %u instructions (%u a tick; counted by the interpreter only)\n",
                         (unsigned)ngp_z80_steps, (unsigned)(ngp_z80_steps / (n ? n : 1)), (unsigned)ngp_cpu_steps, (unsigned)(ngp_cpu_steps / (n ? n : 1)));
+    printf("pictures=%u (ticks in which the game changed its picture, palette changes aside)\n", changed_pictures);
     printf("ticks=%u checksum=%08x\n", n, (unsigned)game_checksum());
     return 0;
 }
