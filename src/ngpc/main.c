@@ -4,10 +4,10 @@
  *   game             play; Escape quits
  *   game bench N     play N logic ticks from scripted input, quit, write bench.txt (the proof of speed)
  *
- * The display here is the FIRST one of a port, not the final one: the picture is computed pixel by pixel from
- * the K2GE's memory (src/ngpc/k2ge.c) and converted with the kit's chunky-to-planar routine. It is always
- * right and never fast: PLAYBOOK-NGPC.md says what replaces it. Every Neo Geo Pocket pixel is two Amiga
- * pixels wide here (160 x 152 shown as 320 x 152).
+ * The display shows the Neo Geo Pocket's 160 x 152 picture at its own size in the middle of a black 320 x 256
+ * screen. It draws the picture from the K2GE's memory (k2ge_frame_idx: the 256 palette entries are the 256 pens of
+ * an 8-plane screen) and converts it with the kit's chunky-to-planar routine, row by row. It draws a new picture only
+ * when the game changed the K2GE's memory; a change of colours alone only reloads the palette.
  */
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -25,17 +25,22 @@
 #undef TICKS_PER_SECOND                 /* <proto/dos.h> has its own */
 #define TICKS_PER_SECOND 60             /* the Neo Geo Pocket shows 60 frames a second: 6 ticks every 5 frames */
 
-void c2p2x1_8_c5_gen_init(int cx __asm("d0"), int cy __asm("d1"), int offx __asm("d2"), int offy __asm("d3"),
-                          int rowlen __asm("d4"), int bplsize __asm("d5"), int chunkylen __asm("d6"));
-void c2p2x1_8_c5_gen(void *chunky __asm("a0"), void *planes __asm("a1"));
+void c2p1x1_8_c5_gen_init(int cx __asm("d0"), int cy __asm("d1"), int offx __asm("d2"), int offy __asm("d3"),
+                          int rowlen __asm("d4"), int bplsize __asm("d5"));
+void c2p1x1_8_c5_gen(void *chunky __asm("a0"), void *planes __asm("a1"));
+
+#define PIC_X 80                        /* where the picture sits on the 320 x 256 screen: in the middle */
+#define PIC_Y 52
 
 /* ---- the game ------------------------------------------------------------------------------ */
 
-static const DispCfg display = { .planes = 8, .scroll = 0, .fetch = 3, .view_h = K2GE_H_LINES, .buf_h = K2GE_H_LINES,
+static const DispCfg display = { .planes = 8, .scroll = 0, .fetch = 3, .view_h = 256, .buf_h = 256,
                                  .level_w = 0, .buffers = 2, .double_y = 0, .sprite_w = 16, .sprite_bank = 1 };
 static UBYTE *chunky;                   /* 160 x 152 palette entries */
 static ULONG palette[256];
-static UBYTE pal_seen[0x200], neg_seen = 1;
+static ULONG chunky_gen = ~0UL;          /* ngp_vid_gen when chunky was drawn */
+static struct { UBYTE *buf; ULONG gen; } shown[2];    /* what each screen buffer holds */
+ULONG pictures_drawn, pictures_converted, draw_cck, convert_cck;     /* how many, and the colour clocks they took */
 static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the logic's own cost */
 
 static int game_load(void)
@@ -52,7 +57,8 @@ static int game_load(void)
 
 static void game_start(void)
 {
-    c2p2x1_8_c5_gen_init(K2GE_W, K2GE_H_LINES, 0, 0, disp_row, disp_plane, K2GE_W);
+    c2p1x1_8_c5_gen_init(K2GE_W, 1, 0, 0, disp_row, disp_plane);        /* one row of the picture at a time */
+    ngp_pal_dirty = 1;
 }
 
 /* joystick in port 2 = pad, fire = A, second fire = B. Keys: cursor keys, X = A, Z = B, Space or Return = Option */
@@ -72,19 +78,29 @@ static UWORD read_input(void)
 static void game_draw(void)
 {
     int i, y;
-    UBYTE neg = ngp_vid[0x12] & 0x80;
-    if (neg != neg_seen || memcmp(pal_seen, ngp_vid + 0x200, 0x200)) {      /* the K2GE's 256 palette entries are the 256 pens */
-        memcpy(pal_seen, ngp_vid + 0x200, 0x200); neg_seen = neg;
+    if (ngp_pal_dirty) {                        /* the K2GE's 256 palette entries are the 256 pens */
+        UBYTE neg = ngp_vid[0x12] & 0x80;
+        ngp_pal_dirty = 0;
         for (i = 0; i < 256; i++) {
-            UWORD c = (UWORD)(pal_seen[i * 2] | pal_seen[i * 2 + 1] << 8);
+            UWORD c = (UWORD)(ngp_vid[0x200 + i * 2] | ngp_vid[0x201 + i * 2] << 8);
             if (neg) c = ~c;
             palette[i] = ((ULONG)(c & 15) * 17 << 16) | ((ULONG)((c >> 4) & 15) * 17 << 8) | (ULONG)((c >> 8) & 15) * 17;
         }
-        palette[0] = 0;                                         /* pen 0 is never drawn: it is the border */
+        palette[0] = 0;                         /* pen 0 is never in the picture (sprite colour 0 is see-through): the border */
         disp_palette(palette, 0, 256);
     }
-    for (y = 0; y < K2GE_H_LINES; y++) k2ge_line_idx(ngp_vid, y, chunky + y * K2GE_W);
-    c2p2x1_8_c5_gen(chunky, disp_back);
+    if (chunky_gen != ngp_vid_gen) {           /* the game changed the picture */
+        ULONG t0 = sys_now();
+        k2ge_frame_idx(ngp_vid, chunky);
+        chunky_gen = ngp_vid_gen; pictures_drawn++; draw_cck += sys_now() - t0;
+    }
+    for (i = 0; i < 2 && shown[i].buf && shown[i].buf != disp_back; i++) ;
+    if (i == 2) i = 0;
+    if (shown[i].buf != disp_back || shown[i].gen != chunky_gen) {    /* this buffer shows an older picture */
+        UBYTE *dst = disp_back + PIC_Y * disp_row + PIC_X / 8; ULONG t0 = sys_now();
+        for (y = 0; y < K2GE_H_LINES; y++, dst += disp_row) c2p1x1_8_c5_gen(chunky + y * K2GE_W, dst);
+        shown[i].buf = disp_back; shown[i].gen = chunky_gen; pictures_converted++; convert_cck += sys_now() - t0;
+    }
 }
 
 /* ---- the loop: keep as it is ------------------------------------------------------------------ */
@@ -93,9 +109,10 @@ int main(int argc, char **argv)
 {
     ULONG bench = (argc > 2 && !strcmp(argv[1], "bench")) ? strtoul(argv[2], 0, 10) : 0;
     ULONG last, now, vblanks, t0, t1, frames = 0, ticks = 0, acc = 0, hz;
-    char text[120];
+    char text[200];
 
     if (!game_load() || !disp_open(&display)) { disp_close(); sys_free_all(); return 20; }
+    if (disp_plane != 320 * 256 / 8) { printf("the display is not the one the C2P routine was assembled for\n"); disp_close(); sys_free_all(); return 20; }
     sys_force_pal = 1;                                          /* NTSC machine: run the picture at 50 Hz */
     if (!sys_take()) { disp_close(); sys_free_all(); return 20; }
     sys_vbl_hook = sys_key_poll;                                /* keys are read at every vertical blank */
@@ -131,8 +148,12 @@ int main(int argc, char **argv)
     sys_free_all();
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
     if (bench) {
-        sprintf(text, "ticks=%lu checksum=%08lx logic_avg_cck=%lu logic_worst_cck=%lu", (unsigned long)ticks, (unsigned long)game_checksum(),
-                (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst);
+        sprintf(text, "ticks=%lu checksum=%08lx logic_avg_cck=%lu logic_worst_cck=%lu", (unsigned long)ticks,
+                (unsigned long)game_checksum(), (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst);
+        perf_note(text);
+        sprintf(text, "pictures_drawn=%lu draw_avg_cck=%lu converted=%lu convert_avg_cck=%lu", (unsigned long)pictures_drawn,
+                (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)pictures_converted,
+                (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
         perf_note(text);
         perf_save("bench.txt");
     }

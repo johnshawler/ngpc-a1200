@@ -11,6 +11,7 @@ const uint8_t *ngp_rom; uint32_t ngp_rom_len; const uint8_t *ngp_font;
 uint8_t ngp_pad;
 uint32_t ngp_fatal_pc; int ngp_fatal_why;
 uint32_t ngp_frames;
+uint32_t ngp_vid_gen; uint8_t ngp_pal_dirty;
 const uint8_t ngp_even[256] = {               /* 1 = an even number of bits set: the V flag of logic operations */
     1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
     0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,
@@ -176,6 +177,9 @@ void ngp_wr_slow(uint32_t a, uint8_t v)
         if (o >= 0x200 && o < 0x400 && (o & 1)) v &= 0x0f;              /* palette: 12 bits */
         if (o == 0x7e2 && ngp_vid[0x7f0] != 0xaa) return;               /* the mode register is locked */
         if (o == 0x10 || o == 0x08 || o == 0x09) return;                /* read-only */
+        if (ngp_vid[o] == v) return;
+        if (o - 0x200u < 0x200u) ngp_pal_dirty = 1;                       /* a colour: the picture's pens stay */
+        else { ngp_vid_gen++; if (o == 0x12) ngp_pal_dirty = 1; }         /* 0x8012: the edge pen and the negative bit */
         ngp_vid[o] = v;
     }                                                                   /* writes to the cartridge (flash commands) are dropped */
 }

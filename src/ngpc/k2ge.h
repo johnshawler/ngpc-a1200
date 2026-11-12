@@ -11,4 +11,6 @@ void k2ge_line(const uint8_t *v, int line, uint16_t *out);
 /* The same line as palette entries: out = 160 numbers 0..255, the colour's place in the palette RAM at 0x8200
    (0-63 sprites, 64-127 scroll plane 1, 128-191 scroll plane 2, 240-247 background, 248-255 window). */
 void k2ge_line_idx(const uint8_t *v, int line, uint8_t *out);
+/* All 152 lines into out (160 x 152 bytes), the same as k2ge_line_idx() line by line, several times faster. */
+void k2ge_frame_idx(const uint8_t *v, uint8_t *out);
 #endif

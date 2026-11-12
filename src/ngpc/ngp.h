@@ -16,6 +16,8 @@ extern const uint8_t *ngp_font;         /* 2 KB: the BIOS's character set, or 0 
 extern uint8_t ngp_pad;                 /* controller: bit 0 up, 1 down, 2 left, 3 right, 4 A, 5 B, 6 Option */
 extern uint32_t ngp_fatal_pc; extern int ngp_fatal_why;       /* set when the program reached something not translated */
 extern uint32_t ngp_frames;             /* frames (ticks) run so far */
+extern uint32_t ngp_vid_gen;            /* +1 at every change of the K2GE's memory outside the palettes: the picture changed */
+extern uint8_t ngp_pal_dirty;           /* a palette entry or 0x8012 changed (the display clears it) */
 extern uint32_t ngp_z80_steps, ngp_cpu_steps;   /* instructions run so far: the sound program; the main CPU (interpreter only) */
 
 extern const uint8_t ngp_even[256];     /* 1 = an even number of bits set */

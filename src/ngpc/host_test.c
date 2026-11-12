@@ -8,6 +8,7 @@
  *   host_test N -r file    also write the machine after every tick to file: RAM 0x4000-0x7FFF (16 KB), the K2GE
  *                          (16 KB), the ports (256 bytes), the registers (88 bytes: 20 longs, SR, F', stop reason, pc)
  *   host_test N -d t1,t2   also write the picture after these ticks as host_NNNNN.ppm
+ *   host_test N -k         also check after every tick that k2ge_frame_idx() draws what k2ge_line_idx() draws
  * The cartridge is assets/rom.bin and the BIOS's character set assets/font.bin (tools/make_assets_ngpc.sh).
  */
 #include <stdio.h>
@@ -63,6 +64,11 @@ int main(int argc, char **argv)
             fwrite(ngp_ram, 1, sizeof ngp_ram, ramlog); fwrite(ngp_vid, 1, sizeof ngp_vid, ramlog); fwrite(ngp_io, 1, sizeof ngp_io, ramlog); fwrite(r, 1, 88, ramlog);
         }
         if (dumps) { snprintf(key, sizeof key, ",%u,", t + 1); snprintf(list, sizeof list, ",%s,", dumps); if (strstr(list, key)) { snprintf(name, sizeof name, "host_%05u.ppm", t + 1); picture(name); } }
+        if (argc > 2 && !strcmp(argv[2], "-k")) {
+            static uint8_t fr[K2GE_W * K2GE_H_LINES], ln[K2GE_W]; int y;
+            k2ge_frame_idx(ngp_vid, fr);
+            for (y = 0; y < K2GE_H_LINES; y++) { k2ge_line_idx(ngp_vid, y, ln); if (memcmp(ln, fr + y * K2GE_W, K2GE_W)) { printf("k2ge_frame_idx differs from k2ge_line_idx: tick %u, line %d\n", t + 1, y); return 1; } }
+        }
         if (ngp_fatal_why) { fprintf(stderr, "STOPPED at tick %u: reason %d at %06x\n", t + 1, ngp_fatal_why, (unsigned)ngp_fatal_pc); break; }
     }
     if (ramlog) fclose(ramlog);
