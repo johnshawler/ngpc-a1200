@@ -56,7 +56,7 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: referee PASS as a per-pixel game with 4 MB fast RAM, 15.6 pictures a second, game time at 84% of the clock,
+Status: referee PASS as a per-pixel game with 4 MB fast RAM, 18.1 pictures a second, game time at 92% of the clock,
 checksum equal; music and effects recorded from the game's own sound program (93-98% of sounding frames as the real
 driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 27,634 colour clocks a
 tick over the bench (47% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
@@ -69,6 +69,6 @@ backlog is in history/llb/PIPELINE.md.
 | 1 | The display: `draw_cell`, overlay and sprite loops in assembly | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, fewer routine calls for memory that is not work RAM | logic is 47% of the machine |
 | 3 | Sound: more input scripts so the recorder sees every song and effect; stereo | commands the bench never sends are silent |
-| 4 | Passes that take more than 8 frames (scene changes): spread the cell redraws | the cause of the lost game time |
+| 4 | Ticks that take several frames alone (scene changes: 16,000 instructions and 7,600 video bytes in one tick, 9.5 frames): video writes and copies faster | the rest of the lost game time |
 | 5 | Trace the rest of the game (other courses, modes) | untraced code stops the port |
 | 6 | Why the profiling build does not finish 3,600 ticks | profiles of play need it |

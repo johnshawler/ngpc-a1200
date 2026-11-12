@@ -51,6 +51,12 @@ static struct { UBYTE *buf; ULONG gen; ULONG rows[K2GE_H_LINES]; } shown[2];   /
 static ULONG *rgb_of;                   /* 4,096 entries: a K2GE colour (0x0BGR) as 0x00RRGGBB */
 ULONG pictures_drawn, pictures_converted, draw_cck, convert_cck;     /* how many, and the colour clocks they took */
 static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the logic's own cost */
+/* A pass whose ticks took more than this much skips drawing a new picture (at most SKIP_MAX passes in a row): the kit's
+   loop gives a pass at most 8 frames of game time, and heavy ticks plus a picture went over that at scene changes */
+#define SKIP_LOGIC (2 * 71051UL)
+#define SKIP_MAX 8
+static ULONG logic_seen;
+static int skipped_in_row;
 
 static int game_load(void)
 {
@@ -96,7 +102,7 @@ static UWORD read_input(void)
 
 static void game_draw(void)
 {
-    int i, y;
+    int i, y, skip;
     if (ngp_pal_dirty) {                        /* the K2GE's 256 palette entries are the 256 pens */
         UBYTE neg = ngp_vid[0x12] & 0x80;
         ngp_pal_dirty = 0;
@@ -108,7 +114,10 @@ static void game_draw(void)
         palette[0] = 0;                         /* pen 0 is never in the picture (sprite colour 0 is see-through): the border */
         disp_palette(palette, 0, 256);
     }
-    if (chunky_gen != ngp_vid_gen) {           /* the game changed the picture */
+    skip = chunky_gen != ngp_vid_gen && logic_total - logic_seen > SKIP_LOGIC && skipped_in_row < SKIP_MAX;
+    logic_seen = logic_total;
+    skipped_in_row = skip ? skipped_in_row + 1 : 0;
+    if (chunky_gen != ngp_vid_gen && !skip) {   /* the game changed the picture (the next pass draws it if skipped) */
         ULONG t0 = sys_now();
         k2ge_frame_cached(ngp_vid, &ngp_dirty, chunky);
         chunky_gen = ngp_vid_gen; pictures_drawn++; draw_cck += sys_now() - t0;

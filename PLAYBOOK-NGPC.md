@@ -12,7 +12,8 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, and the referee passes it as a per-pixel game (15.6 pictures a second, game time at 84% of the clock).
+a black border, with its music and effects, and the referee passes it as a per-pixel game (18.1 pictures a second, game
+time at 92% of the clock).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -236,6 +237,14 @@ plane buffer row keeps a bit per cell column for "all opaque" and "all see-throu
 an empty front plane is skipped. `k2ge_line_gen[]` counts the writes of each line, so `main.c` converts into a screen
 buffer only the rows written since that buffer got them. In Neo Turf Masters characters change in 90% of the
 pictures (about 46 each, so 90-170 cells are redrawn), which is now the largest part of a picture (`draw_cell`).
+
+**Game time against pictures.** The kit's loop gives a pass at most 8 frames of game time; a pass whose ticks are
+heavy and that also draws a picture goes over and loses the rest. `game_draw` (ours, not the loop) skips the new
+picture in a pass whose ticks took over 2 frames, at most 8 passes in a row; the conversion still runs, so the
+screen never shows an older picture than before. Neo Turf Masters: game time from 83% to 92%, pictures a second
+from 15.1 to 18.1 (fewer pictures drawn, a shorter run). A model of the loop on the host (the instructions and video
+changes per tick from the interpreter, costs from the bench) chose the rule; it predicts game time too high (it
+uses average costs) but ranks the choices right.
 
 Next for the display, by expected gain: `draw_cell`, the overlay and sprite loops in assembly;
 a planar display per game in the brief's sense (one scroll plane hardware-scrolled, the other as stamps or as a
