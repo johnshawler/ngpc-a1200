@@ -184,6 +184,12 @@ void ngp_wr_slow(uint32_t a, uint8_t v)
     }                                                                   /* writes to the cartridge (flash commands) are dropped */
 }
 
+/* the rare cases of the generated code's accessors (gen900.h) */
+uint32_t ngp_rd16_slow(uint32_t a) { return mem_r8(a) | (uint32_t)mem_r8((a + 1) & 0xffffff) << 8; }
+uint32_t ngp_rd32_slow(uint32_t a) { return ngp_rd16_slow(a) | ngp_rd16_slow((a + 2) & 0xffffff) << 16; }
+void ngp_wr16_slow(uint32_t a, uint32_t v) { mem_w8(a, (uint8_t)v); mem_w8((a + 1) & 0xffffff, (uint8_t)(v >> 8)); }
+void ngp_wr32_slow(uint32_t a, uint32_t v) { ngp_wr16_slow(a, v); ngp_wr16_slow((a + 2) & 0xffffff, v >> 16); }
+
 /* ---- the BIOS ---- */
 int ngp_bios_at(uint32_t pc)
 {

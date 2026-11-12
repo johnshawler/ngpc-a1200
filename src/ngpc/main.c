@@ -33,6 +33,10 @@ void c2p1x1_8_c5_gen(void *chunky __asm("a0"), void *planes __asm("a1"));
 #define PIC_Y 52
 
 /* ---- the game ------------------------------------------------------------------------------ */
+#ifdef NGP_PROF                         /* tools/prof_ngpc.sh: a 1 kHz sampling profiler (src/prof68k.s) */
+extern void prof_install(void), prof_remove(void); extern ULONG prof_buf[], prof_cnt;
+extern void co_resume(void);
+#endif
 
 static const DispCfg display = { .planes = 8, .scroll = 0, .fetch = 3, .view_h = 256, .buf_h = 256,
                                  .level_w = 0, .buffers = 2, .double_y = 0, .sprite_w = 16, .sprite_bank = 1 };
@@ -58,6 +62,9 @@ static int game_load(void)
 static void game_start(void)
 {
     c2p1x1_8_c5_gen_init(K2GE_W, 1, 0, 0, disp_row, disp_plane);        /* one row of the picture at a time */
+#ifdef NGP_PROF
+    prof_install();
+#endif
     ngp_pal_dirty = 1;
 }
 
@@ -109,7 +116,7 @@ int main(int argc, char **argv)
 {
     ULONG bench = (argc > 2 && !strcmp(argv[1], "bench")) ? strtoul(argv[2], 0, 10) : 0;
     ULONG last, now, vblanks, t0, t1, frames = 0, ticks = 0, acc = 0, hz;
-    char text[200];
+    char text[240];
 
     if (!game_load() || !disp_open(&display)) { disp_close(); sys_free_all(); return 20; }
     if (disp_plane != 320 * 256 / 8) { printf("the display is not the one the C2P routine was assembled for\n"); disp_close(); sys_free_all(); return 20; }
@@ -143,19 +150,25 @@ int main(int argc, char **argv)
         if (sys_keys[KEY_ESC] || (bench && ticks >= bench) || ngp_fatal_why) break;
         disp_flip();                                            /* waits for the vertical blank */
     }
+#ifdef NGP_PROF
+    prof_remove();
+#endif
     sys_give();
     disp_close();
     sys_free_all();
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
     if (bench) {
-        sprintf(text, "ticks=%lu checksum=%08lx logic_avg_cck=%lu logic_worst_cck=%lu", (unsigned long)ticks,
-                (unsigned long)game_checksum(), (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst);
-        perf_note(text);
-        sprintf(text, "pictures_drawn=%lu draw_avg_cck=%lu converted=%lu convert_avg_cck=%lu", (unsigned long)pictures_drawn,
-                (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)pictures_converted,
+        sprintf(text, "ticks=%lu checksum=%08lx logic_avg_cck=%lu logic_worst_cck=%lu\npics=%lu draw_cck=%lu conv=%lu conv_cck=%lu",
+                (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst,
+                (unsigned long)pictures_drawn, (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)pictures_converted,
                 (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
         perf_note(text);
         perf_save("bench.txt");
+#ifdef NGP_PROF
+        {   BPTR fh = Open((CONST_STRPTR)"prof.bin", MODE_NEWFILE);     /* where main and co_resume are, then the samples */
+            ULONG where[2]; where[0] = (ULONG)main; where[1] = (ULONG)co_resume;
+            if (fh) { Write(fh, where, 8); Write(fh, prof_buf, prof_cnt * 4); Close(fh); } }
+#endif
     }
     return 0;
 }

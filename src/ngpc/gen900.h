@@ -26,33 +26,47 @@
 #define LE16(p) ((uint32_t)((p)[0] | (p)[1] << 8))
 #define LE32(p) ((uint32_t)((p)[0] | (p)[1] << 8 | (uint32_t)(p)[2] << 16 | (uint32_t)(p)[3] << 24))
 
+/* The fast paths are inline; what is rare (I/O, the BIOS, the sound processor's RAM, the K2GE's registers and
+   palettes, a long across two areas) is in ngp.c. Video memory without side effects (sprites, maps, characters:
+   0x8800-0xBFFF) is written directly; a write that changes a byte marks the picture changed (ngp_vid_gen). */
+uint32_t ngp_rd16_slow(uint32_t a), ngp_rd32_slow(uint32_t a);
+void ngp_wr16_slow(uint32_t a, uint32_t v), ngp_wr32_slow(uint32_t a, uint32_t v);
+#define VIDW(o, v) do { uint8_t v_ = (uint8_t)(v); if (ngp_vid[o] != v_) { ngp_vid[o] = v_; ngp_vid_gen++; } } while (0)
+
 static inline uint32_t RD8(uint32_t a) { return mem_r8(a & 0xffffff); }
 static inline uint32_t RD16(uint32_t a)
 {
     a &= 0xffffff;
     if (a - 0x4000u < 0x3fffu) return LE16(ngp_ram + a - 0x4000);
     if (a - 0x200000u < 0x1fffffu) return LE16(ngp_rom + a - 0x200000);
-    return mem_r8(a) | (uint32_t)mem_r8((a + 1) & 0xffffff) << 8;
+    return ngp_rd16_slow(a);
 }
 static inline uint32_t RD32(uint32_t a)
 {
     a &= 0xffffff;
     if (a - 0x4000u < 0x3ffdu) return LE32(ngp_ram + a - 0x4000);
     if (a - 0x200000u < 0x1ffffdu) return LE32(ngp_rom + a - 0x200000);
-    return RD16(a) | RD16(a + 2) << 16;
+    return ngp_rd32_slow(a);
 }
-static inline void WR8(uint32_t a, uint32_t v) { mem_w8(a & 0xffffff, (uint8_t)v); }
+static inline void WR8(uint32_t a, uint32_t v)
+{
+    a &= 0xffffff;
+    if (a - 0x4000u < 0x3000u) { ngp_ram[a - 0x4000] = (uint8_t)v; return; }
+    if (a - 0x8800u < 0x3800u) { VIDW(a - 0x8000, v); return; }
+    ngp_wr_slow(a, (uint8_t)v);
+}
 static inline void WR16(uint32_t a, uint32_t v)
 {
     a &= 0xffffff;
     if (a - 0x4000u < 0x2fffu) { uint8_t *p = ngp_ram + a - 0x4000; p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); return; }
-    mem_w8(a, (uint8_t)v); mem_w8((a + 1) & 0xffffff, (uint8_t)(v >> 8));
+    if (a - 0x8800u < 0x37ffu) { VIDW(a - 0x8000, v); VIDW(a - 0x7fff, v >> 8); return; }
+    ngp_wr16_slow(a, v);
 }
 static inline void WR32(uint32_t a, uint32_t v)
 {
     a &= 0xffffff;
     if (a - 0x4000u < 0x2ffdu) { uint8_t *p = ngp_ram + a - 0x4000; p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); return; }
-    WR16(a, v); WR16(a + 2, v >> 16);
+    ngp_wr32_slow(a, v);
 }
 #define XSP_ cpu.gpr[3]
 #define PUSH8(v)  do { XSP_ -= 1; WR8(XSP_, (v)); } while (0)
