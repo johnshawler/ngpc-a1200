@@ -9,6 +9,7 @@
 #include "k2ge.h"
 
 #define RD16(p) ((uint16_t)((p)[0] | (p)[1] << 8))
+#define NOINLINE __attribute__((noinline))          /* kept apart: the profiler names them */
 
 static void tile_row(const uint8_t *v, uint8_t *out, uint8_t *z, int x, unsigned tile, int row, int mirror,
                      unsigned pal, int depth, int lo, int hi)
@@ -193,6 +194,17 @@ void k2ge_frame_idx(const uint8_t *v, uint8_t *out)
 #define PW (256 + K2GE_W)                           /* a plane buffer row: 256 pixels, then its first 160 again */
 static uint8_t pbuf[2][256 * PW];                   /* pens of the two scroll planes; 0 = see-through */
 static int pbuf_ready;
+/* What the last picture was made from, so that a line whose inputs did not change is not drawn again: the plane
+   buffer rows redrawn since, the registers every line reads, and each line's sprites (entry, number, row, palette, x) */
+uint32_t k2ge_line_gen[K2GE_H_LINES];            /* +1 each time k2ge_frame_cached() writes the line */
+static uint8_t prow_dirty[2][256], prow_any;
+/* per plane buffer row, one bit per 8-pixel cell column: all 8 pixels drawn (opq) or all see-through (clr) */
+static uint32_t opq[2][256], clr[2][256], need[256];
+static uint8_t last_regs[11], last_ok;
+static const uint8_t *last_out;
+static uint8_t ls_n[K2GE_H_LINES];
+static uint32_t ls_a[K2GE_H_LINES][64];
+static int16_t ls_x[K2GE_H_LINES][64];
 
 static void draw_cell(const uint8_t *v, int which, unsigned cell)
 {
@@ -201,10 +213,15 @@ static void draw_cell(const uint8_t *v, int which, unsigned cell)
     uint32_t base4 = pal * 0x01010101u;
     const uint8_t *chr = v + 0x2000 + (e & 0x1ff) * 16;
     int m = (e & 0x8000) ? 1 : 0;
+    memset(&prow_dirty[which][cy * 8], 1, 8); prow_any = 1;
     for (r = 0; r < 8; r++) {
+        uint32_t bit = 1u << cx, *po = &opq[which][cy * 8 + r], *pc = &clr[which][cy * 8 + r], k0, k1;
         unsigned bits = RD16(chr + ((e & 0x4000) ? 7 - r : r) * 2), b0 = m ? bits & 0xff : bits >> 8, b1 = m ? bits >> 8 : bits & 0xff;
         uint8_t *q = pbuf[which] + (cy * 8 + r) * PW + cx * 8;
         uint32_t w0 = (pix_tab[m][b0] + base4) & msk_tab[m][b0], w1 = (pix_tab[m][b1] + base4) & msk_tab[m][b1];
+        k0 = msk_tab[m][b0]; k1 = msk_tab[m][b1];
+        if ((k0 & k1) == 0xffffffffu) *po |= bit; else *po &= ~bit;
+        if (!(k0 | k1)) *pc |= bit; else *pc &= ~bit;
         L4(q) = w0; L4(q + 4) = w1;
         if (cx < K2GE_W / 8) { L4(q + 256) = w0; L4(q + 260) = w1; }
     }
@@ -224,26 +241,30 @@ static void overlay(uint8_t *out, const uint8_t *src, unsigned bit)
     }
 }
 
-void k2ge_frame_cached(const uint8_t *v, K2geDirty *d, uint8_t *out)
+/* bring the plane buffers up to date (the cells and characters the game changed); 1 if characters changed */
+static NOINLINE int update_planes(const uint8_t *v, K2geDirty *d)
 {
-    static uint32_t lbl[(K2GE_W + 2 * MARGIN + 8) / 4];
-    uint8_t *lb = (uint8_t *)lbl;
-    int winx = v[2], winy = v[3], winw = v[4], winh = v[5], x, y, i;
-    int lo = winx, hi = (winx + winw < K2GE_W ? winx + winw : K2GE_W) - 1, full = lo == 0 && hi == K2GE_W - 1;
-    uint8_t edge = (uint8_t)(0xf8 + (v[0x12] & 7)), back = (uint8_t)(0xf0 + (v[0x118] & 7));
-    uint32_t back4 = back * 0x01010101u, edge4 = edge * 0x01010101u;
-    int lastx = 0, lasty = 0, backp = (v[0x30] & 0x80) ? 0 : 1;
     unsigned c;
-    if (!tabs_ready) make_tabs();
-    if (!pbuf_ready) { for (c = 0; c < 2048; c++) d->cell[c] = 1; d->any = 1; pbuf_ready = 1; }
-    if (d->any) {                                   /* bring the plane buffers up to date */
-        for (c = 0; c < 2048; c++) {
-            unsigned e = RD16(v + 0x1000 + c * 2);
-            if (d->cell[c] || d->chr[e & 0x1ff]) { draw_cell(v, c >> 10, c & 1023); d->cell[c] = 0; }
-        }
-        for (c = 0; c < 512; c++) d->chr[c] = 0;
-        d->any = 0;
+    int chr_any = 0;
+    for (c = 0; c < 512; c += 4) if (L4(d->chr + c)) { chr_any = 1; break; }
+    if (chr_any) {                              /* characters changed: every cell that shows one of them */
+        const uint8_t *m = v + 0x1000, *ch = d->chr;
+        uint8_t *cl = d->cell;
+        for (c = 0; c < 2048; c++, m += 2)
+            if (cl[c] | ch[m[0] | (m[1] & 1) << 8]) { draw_cell(v, c >> 10, c & 1023); cl[c] = 0; }
+        memset(d->chr, 0, sizeof d->chr);
+    } else {                                    /* only cells: four flags at a time */
+        for (c = 0; c < 2048; c += 4)
+            if (L4(d->cell + c)) { unsigned k; for (k = c; k < c + 4; k++) if (d->cell[k]) { draw_cell(v, k >> 10, k & 1023); d->cell[k] = 0; } }
     }
+    d->any = 0;
+    return chr_any;
+}
+
+/* where every sprite is (chains followed), and the lines each one covers, highest number first */
+static NOINLINE void sprites_setup(const uint8_t *v)
+{
+    int lastx = 0, lasty = 0, y, i;
     for (y = 0; y < K2GE_H_LINES; y++) spr_count[y] = 0;
     for (i = 0; i < 64; i++) {                      /* where every sprite is, chains followed */
         const uint8_t *s = v + 0x0800 + i * 4;
@@ -264,21 +285,74 @@ void k2ge_frame_cached(const uint8_t *v, K2geDirty *d, uint8_t *out)
         if (!((e >> 11) & 3)) continue;
         for (r = 0; r < 8; r++) { int l = spr_y[i] + r; if (l >= 0 && l < K2GE_H_LINES) spr_lines[l][spr_count[l]++] = (uint8_t)i; }
     }
+}
+
+void k2ge_frame_cached(const uint8_t *v, K2geDirty *d, uint8_t *out)
+{
+    static uint32_t lbl[(K2GE_W + 2 * MARGIN + 8) / 4];
+    uint8_t *lb = (uint8_t *)lbl;
+    int winx = v[2], winy = v[3], winw = v[4], winh = v[5], x, y;
+    int lo = winx, hi = (winx + winw < K2GE_W ? winx + winw : K2GE_W) - 1, full = lo == 0 && hi == K2GE_W - 1;
+    uint8_t edge = (uint8_t)(0xf8 + (v[0x12] & 7)), back = (uint8_t)(0xf0 + (v[0x118] & 7));
+    uint32_t back4 = back * 0x01010101u, edge4 = edge * 0x01010101u;
+    int backp = (v[0x30] & 0x80) ? 0 : 1;
+    unsigned c;
+    int chr_any = 0, all;
+    uint8_t regs[11];
+    if (!tabs_ready) make_tabs();
+    if (!pbuf_ready) {
+        for (c = 0; c < 2048; c++) d->cell[c] = 1;
+        d->any = 1; pbuf_ready = 1;
+        for (c = 0; c < 256; c++) {                 /* the cell columns a 160-pixel window from x = c touches */
+            unsigned k, n = (c & 7) ? 21 : 20;
+            need[c] = 0;
+            for (k = 0; k < n; k++) need[c] |= 1u << (((c >> 3) + k) & 31);
+        }
+    }
+    if (d->any) chr_any = update_planes(v, d);
+    regs[0] = v[2]; regs[1] = v[3]; regs[2] = v[4]; regs[3] = v[5]; regs[4] = v[0x12]; regs[5] = v[0x118];
+    regs[6] = v[0x30] & 0x80; regs[7] = v[0x32]; regs[8] = v[0x33]; regs[9] = v[0x34]; regs[10] = v[0x35];
+    all = !last_ok || out != last_out || memcmp(regs, last_regs, sizeof regs);   /* every line, or only those that changed */
+    memcpy(last_regs, regs, sizeof regs); last_ok = 1; last_out = out;
+    sprites_setup(v);
     {
         unsigned bsx = v[backp ? 0x34 : 0x32], bsy = v[backp ? 0x35 : 0x33], fsx = v[backp ? 0x32 : 0x34], fsy = v[backp ? 0x33 : 0x35];
         unsigned bbit = backp ? 0x80 : 0x40, fbit = backp ? 0x40 : 0x80;
         const uint8_t *bp = pbuf[backp], *fp = pbuf[!backp];
         for (y = 0; y < K2GE_H_LINES; y++, out += K2GE_W) {
             uint8_t *o;
-            if (y < winy || y >= winy + winh || lo > hi) { for (x = 0; x < K2GE_W; x += 4) L4(out + x) = edge4; continue; }
-            o = spr_count[y] ? lb + MARGIN : out;   /* lines with sprites are built with room on both sides */
-            for (x = 0; x < K2GE_W; x += 4) L4(o + x) = back4;
-            if (spr_count[y]) sprites_line(v, lb, y, 1);
-            overlay(o, bp + ((y + bsy) & 255) * PW + bsx, bbit);
-            if (spr_count[y]) sprites_line(v, lb, y, 2);
-            overlay(o, fp + ((y + fsy) & 255) * PW + fsx, fbit);
+            unsigned n = spr_count[y], k;
+            int same = ls_n[y] == n;
+            if (y < winy || y >= winy + winh || lo > hi) {
+                if (all) { for (x = 0; x < K2GE_W; x += 4) L4(out + x) = edge4; k2ge_line_gen[y]++; }
+                continue;
+            }
+            for (k = 0; k < n; k++) {               /* the line's sprites against the last picture's */
+                unsigned j = spr_lines[y][k];
+                uint32_t a = RD16(v + 0x0800 + j * 4) | j << 16 | (unsigned)(y - spr_y[j]) << 22 | (v[0x0c00 + j] & 15u) << 25;
+                if (ls_a[y][k] != a || ls_x[y][k] != spr_x[j]) { same = 0; ls_a[y][k] = a; ls_x[y][k] = spr_x[j]; }
+            }
+            ls_n[y] = (uint8_t)n;
+            if (!all && same && !(chr_any && n) &&
+                !(prow_any && (prow_dirty[backp][(y + bsy) & 255] || prow_dirty[!backp][(y + fsy) & 255]))) continue;
+            k2ge_line_gen[y]++;
+            o = n ? lb + MARGIN : out;              /* lines with sprites are built with room on both sides */
+            {
+                unsigned rb = (y + bsy) & 255, rf = (y + fsy) & 255;
+                const uint8_t *sb = bp + rb * PW + bsx;
+                if ((opq[backp][rb] & need[bsx]) == need[bsx]) {    /* the back plane covers the line: a copy */
+                    for (x = 0; x < K2GE_W; x += 4) L4(o + x) = L4(sb + x);
+                } else {
+                    for (x = 0; x < K2GE_W; x += 4) L4(o + x) = back4;
+                    if (n) sprites_line(v, lb, y, 1);
+                    overlay(o, sb, bbit);
+                }
+                if (n) sprites_line(v, lb, y, 2);
+                if ((clr[!backp][rf] & need[fsx]) != need[fsx]) overlay(o, fp + rf * PW + fsx, fbit);   /* not all see-through */
+            }
             if (spr_count[y]) { sprites_line(v, lb, y, 3); for (x = 0; x < K2GE_W; x += 4) L4(out + x) = L4(lb + MARGIN + x); }
             if (!full) { for (x = 0; x < lo && x < K2GE_W; x++) out[x] = edge; for (x = hi + 1; x < K2GE_W; x++) out[x] = edge; }
         }
     }
+    if (prow_any) { memset(prow_dirty, 0, sizeof prow_dirty); prow_any = 0; }
 }

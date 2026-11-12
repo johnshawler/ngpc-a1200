@@ -17,6 +17,9 @@ void k2ge_frame_idx(const uint8_t *v, uint8_t *out);
    characters (0-511). Whoever writes the K2GE's memory marks them (ngp.c); k2ge_frame_cached() clears them. */
 typedef struct { uint8_t cell[2048], chr[512], any; } K2geDirty;
 /* The same picture as k2ge_frame_idx(), from two 256 x 256 buffers that hold the scroll planes already drawn and are
-   brought up to date only where cells or characters changed. Much faster when little changes. */
+   brought up to date only where cells or characters changed, and only into the lines whose inputs changed: out must
+   hold this function's previous picture (a different out pointer redraws every line). Much faster when little changes. */
 void k2ge_frame_cached(const uint8_t *v, K2geDirty *dirty, uint8_t *out);
+/* +1 every time k2ge_frame_cached() writes that line of out: a line whose number did not change holds the same pens */
+extern uint32_t k2ge_line_gen[K2GE_H_LINES];
 #endif

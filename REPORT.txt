@@ -15,11 +15,13 @@ Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colour
                        are the pens). The 160 x 152 picture at its own size in the middle of a black 320 x 256 screen
                        (the user's choice). Drawn into a byte buffer by k2ge_frame_cached (scroll planes kept drawn,
                        redrawn only where the game changed cells or characters) and converted row by row with the
-                       kit's c2p1x1_8_c5_gen. A picture is drawn only when the game changed the K2GE's memory.
+                       kit's c2p1x1_8_c5_gen. A picture is drawn only when the game changed the K2GE's memory, and
+                       then only its lines whose inputs changed; only rows written since a screen buffer last got
+                       them are converted into it.
 Busiest moment:        play (ball flight and course views: both scroll planes, sprites, new picture every frame). Not
                        a Step 2 sum: the reference machine measures 1,700-3,900 main-CPU instructions a frame there
                        (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 27,634
-                       colour clocks a tick over the bench, a picture 273,342 to draw and 126,201 to convert.
+                       colour clocks a tick over the bench, a picture 181,138 to draw and 71,372 to convert.
 Cut from the original: sound (nothing plays: the model answers the game, it makes no music); saved games (flash writes
                        are accepted and forgotten); the serial link; the date (fixed). Raster effects: not modelled, and
                        not seen used by this game in the bench (it takes the vertical blank interrupt only).
@@ -27,22 +29,22 @@ Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cann
                        enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
                        (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
 With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
-                       frames=791 late=2932 worst_cck=1991026 avg_cck=289013 budget_cck=71051 worst_pct=2802 avg_pct=406 display_hz=50 shown_fps=10.6
-                       ticks=3600 checksum=ac36a76c game_speed=80%
-                       logic_cck=27634 max=658439 pics=310/341 draw_cck=273342 conv_cck=126201
-                       PASS (per-pixel game: 10.6 pictures a second, game time at 80% of the clock: it falls behind where
+                       frames=1111 late=2439 worst_cck=2195338 avg_cck=182668 budget_cck=71051 worst_pct=3089 avg_pct=257 display_hz=50 shown_fps=15.6
+                       ticks=3600 checksum=ac36a76c game_speed=84%
+                       logic_cck=27628 max=658496 pics=381/464 draw_cck=181138 conv_cck=71372
+                       PASS (per-pixel game: 15.6 pictures a second, game time at 84% of the clock: it falls behind where
                        a pass takes more than 8 frames)
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
                        the real sound program as the game sees it after every one of 3,600 ticks
                        (tools/check_sound_ngpc.sh), and the renderers equal the reference renderer after every tick
                        (host_test -k).
-Frame rate claim:      10.6 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
-                       within 8 frames; over the whole bench game time runs at 80% of the clock. 50 Hz is not held and
+Frame rate claim:      15.6 pictures a second shown with 4 MB fast RAM, logic at 60 ticks a second where a pass stays
+                       within 8 frames; over the whole bench game time runs at 84% of the clock. 50 Hz is not held and
                        the stock machine does not start.
                        Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
-                       translated game code. A model of the kit's loop over the bench's per-tick load says halving
-                       either the logic or the display brings game time to about 95%, halving both to 100%.
+                       translated game code. Game time is lost in the passes over 8 frames: scene changes, where
+                       the heaviest ticks (up to 17,000 main-CPU instructions) meet pictures with most cells redrawn.
                        Cheapest upgrade likely to reach full game speed: not measured.
 Not done, not tested:  sound; a display that holds 50 Hz; real A1200 hardware; a Commodore Kickstart
                        ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two

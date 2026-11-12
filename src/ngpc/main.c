@@ -43,7 +43,9 @@ static const DispCfg display = { .planes = 8, .scroll = 0, .fetch = 3, .view_h =
 static UBYTE *chunky;                   /* 160 x 152 palette entries */
 static ULONG palette[256];
 static ULONG chunky_gen = ~0UL;          /* ngp_vid_gen when chunky was drawn */
-static struct { UBYTE *buf; ULONG gen; } shown[2];    /* what each screen buffer holds */
+static struct { UBYTE *buf; ULONG gen; ULONG rows[K2GE_H_LINES]; } shown[2];   /* what each screen buffer holds:
+                                           the picture, and k2ge_line_gen of each row when it was converted */
+static ULONG *rgb_of;                   /* 4,096 entries: a K2GE colour (0x0BGR) as 0x00RRGGBB */
 ULONG pictures_drawn, pictures_converted, draw_cck, convert_cck;     /* how many, and the colour clocks they took */
 static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the logic's own cost */
 
@@ -54,7 +56,11 @@ static int game_load(void)
     UBYTE *font = sys_load("font.bin", MEMF_ANY, &fontlen);     /* the BIOS's character set, if the user has it */
     if (!rom) { printf("cannot load rom.bin: file missing, or not enough memory for %s\n", "the cartridge"); return 0; }
     chunky = sys_alloc(K2GE_W * K2GE_H_LINES, MEMF_ANY | MEMF_CLEAR);
-    if (!chunky) return 0;
+    rgb_of = sys_alloc(4096 * 4, MEMF_ANY);
+    if (!chunky || !rgb_of) return 0;
+    {   ULONG c;
+        for (c = 0; c < 4096; c++) rgb_of[c] = ((c & 15) * 17 << 16) | (((c >> 4) & 15) * 17 << 8) | ((c >> 8) & 15) * 17;
+    }
     game_init(rom, romlen, (font && fontlen == 0x800) ? font : 0);
     return 1;
 }
@@ -91,7 +97,7 @@ static void game_draw(void)
         for (i = 0; i < 256; i++) {
             UWORD c = (UWORD)(ngp_vid[0x200 + i * 2] | ngp_vid[0x201 + i * 2] << 8);
             if (neg) c = ~c;
-            palette[i] = ((ULONG)(c & 15) * 17 << 16) | ((ULONG)((c >> 4) & 15) * 17 << 8) | (ULONG)((c >> 8) & 15) * 17;
+            palette[i] = rgb_of[c & 0xfff];
         }
         palette[0] = 0;                         /* pen 0 is never in the picture (sprite colour 0 is see-through): the border */
         disp_palette(palette, 0, 256);
@@ -105,7 +111,9 @@ static void game_draw(void)
     if (i == 2) i = 0;
     if (shown[i].buf != disp_back || shown[i].gen != chunky_gen) {    /* this buffer shows an older picture */
         UBYTE *dst = disp_back + PIC_Y * disp_row + PIC_X / 8; ULONG t0 = sys_now();
-        for (y = 0; y < K2GE_H_LINES; y++, dst += disp_row) c2p1x1_8_c5_gen(chunky + y * K2GE_W, dst);
+        int fresh = shown[i].buf != disp_back;
+        for (y = 0; y < K2GE_H_LINES; y++, dst += disp_row)     /* only the rows written since this buffer got them */
+            if (fresh || shown[i].rows[y] != k2ge_line_gen[y]) { c2p1x1_8_c5_gen(chunky + y * K2GE_W, dst); shown[i].rows[y] = k2ge_line_gen[y]; }
         shown[i].buf = disp_back; shown[i].gen = chunky_gen; pictures_converted++; convert_cck += sys_now() - t0;
     }
 }

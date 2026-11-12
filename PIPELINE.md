@@ -55,15 +55,16 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: referee PASS as a per-pixel game with 4 MB fast RAM, 10.6 pictures a second, game time at 80% of the clock,
+Status: referee PASS as a per-pixel game with 4 MB fast RAM, 15.6 pictures a second, game time at 84% of the clock,
 checksum equal; no sound; the stock machine cannot hold the cartridge. Logic (68k back end) 27,634 colour clocks a
-tick over the bench (47% of the machine at 60 ticks a second), a picture 273,342 to draw and 126,201 to convert. A
-model of the kit's loop fed with the bench's instructions per tick: halving the logic gives about 95% game time,
-halving the display about 95%, both 100%. The previous port's backlog is in history/llb/PIPELINE.md.
+tick over the bench (47% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
+model of the kit's loop fed with the bench's instructions per tick and average costs predicts 95% (measured 84%:
+the lost time is at scene changes, where heavy ticks meet full redraws, which averages hide). The previous port's
+backlog is in history/llb/PIPELINE.md.
 
 | Priority | Item | Why |
 | --- | --- | --- |
-| 1 | The display: lines and rows that did not change neither drawn nor converted; the overlay and sprite loops in assembly | 400k colour clocks a picture |
+| 1 | The display: `draw_cell`, overlay and sprite loops in assembly | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, fewer routine calls for memory that is not work RAM | logic is 47% of the machine |
 | 3 | Sound: the real driver's chip writes recorded per command on the host, played on Paula | no sound now |
 | 4 | Passes that take more than 8 frames (scene changes): spread the cell redraws | the cause of the lost game time |

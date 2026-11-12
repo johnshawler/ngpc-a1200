@@ -12,7 +12,7 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, and the referee passes it as a per-pixel game (10.6 pictures a second, game time at 80% of the clock).
+a black border, and the referee passes it as a per-pixel game (15.6 pictures a second, game time at 84% of the clock).
 What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
 
 ## 1. What is reusable, what is per game
@@ -227,8 +227,16 @@ to front. `host_test -k` proves it, and `k2ge_frame_idx` (the same picture witho
 | `k2ge_line_idx` line by line (first version) | 670,310 (900 ticks) |
 | `k2ge_frame_idx`, lookup tables, long writes | 406,621 (900 ticks) |
 | `k2ge_frame_cached` | 276,441 drawn (305 of them), conversion 126,203 (329) |
+| ... only lines whose inputs changed, opaque back plane copied, empty front plane skipped; only rows written since that screen buffer got them converted | 181,138 drawn (381), conversion 71,372 (464) |
 
-Next for the display, by expected gain: the overlay and sprite loops in assembly; convert only rows that changed;
+A line is drawn again only if its inputs changed: the registers every line reads, the plane buffer rows it shows
+(marked by `draw_cell`), and its sprites (entry, number, row, palette, x, compared with the last picture's). Each
+plane buffer row keeps a bit per cell column for "all opaque" and "all see-through": an opaque back plane is a copy,
+an empty front plane is skipped. `k2ge_line_gen[]` counts the writes of each line, so `main.c` converts into a screen
+buffer only the rows written since that buffer got them. In Neo Turf Masters characters change in 90% of the
+pictures (about 46 each, so 90-170 cells are redrawn), which is now the largest part of a picture (`draw_cell`).
+
+Next for the display, by expected gain: `draw_cell`, the overlay and sprite loops in assembly;
 a planar display per game in the brief's sense (one scroll plane hardware-scrolled, the other as stamps or as a
 dual playfield the kit does not have yet, sprites as hardware sprites clustered as `src/video.c` of the NES port
 does). Raster effects (timer 0 on horizontal blanks) need the frame model to deliver timer interrupts and the
