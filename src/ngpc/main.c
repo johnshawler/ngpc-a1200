@@ -158,10 +158,11 @@ int main(int argc, char **argv)
     sys_free_all();
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
     if (bench) {
-        sprintf(text, "ticks=%lu checksum=%08lx logic_avg_cck=%lu logic_worst_cck=%lu\npics=%lu draw_cck=%lu conv=%lu conv_cck=%lu",
-                (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst,
-                (unsigned long)pictures_drawn, (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)pictures_converted,
-                (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
+        /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu pics=%lu/%lu draw_cck=%lu conv_cck=%lu",
+                (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
+                (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)pictures_drawn, (unsigned long)pictures_converted,
+                (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
         perf_note(text);
         perf_save("bench.txt");
 #ifdef NGP_PROF

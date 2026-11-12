@@ -11,3 +11,7 @@
 - `tools/bench.sh` allows ticks / 25 + 60 seconds. A port whose logic is still slower than the clock (below the 6 pictures a second where the skeleton lets game time fall behind) cannot finish its bench in that time: `tools/long_bench.sh` takes a time limit.
 - `tools/port.sh` reads `./port.conf` only. With two kinds of port in one repository it now takes `PORT_CONF=<file>`; the default is unchanged.
 - `-Isrc -Isrc/ngpc` finds `src/logic.h` (the NES port's) before `src/ngpc/logic.h` for a file outside `src/ngpc/`. The Neo Geo Pocket sources include their own headers by being in that folder; scripts outside it must put `-Isrc/ngpc` first.
+- The referee's per-pixel gate (tools/check_gates.py) did not look at game time, and its PASS line said "logic by the clock" whatever happened. The brief makes game time the first requirement. The bench now reports game_speed (ticks against vertical blanks) and the PASS line says it when game time falls behind.
+- The kit's perf_note() keeps 128 characters: a second perf_note() replaces the first. The port puts its two extra lines in one note.
+- gcc 16 for the 68020 turns a 4-byte memcpy() into four byte moves and keeps no local symbols in the executable; a profiler needs the linker map to name static functions (tools/prof_ngpc.sh).
+- The Step 1 table has no row for "the original's second processor only has to answer, not to compute": Neo Turf Masters' Z80 runs 2,900 instructions a tick, and the game reads two bytes of what it does. A model of the answers replaced it (PLAYBOOK-NGPC.md section 4).

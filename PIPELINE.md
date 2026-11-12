@@ -54,15 +54,16 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: correct on the emulated A1200 with fast RAM (checksum equal), far from full speed: logic 205k-764k colour
-clocks a tick, the first display 25-30 frames a picture, no sound. The previous port's backlog is in
-history/llb/PIPELINE.md.
+Status: referee PASS as a per-pixel game with 4 MB fast RAM, 8.7 pictures a second, game time at 74% of the clock,
+checksum equal; no sound; the stock machine cannot hold the cartridge. Logic 35,184 colour clocks a tick over the
+bench (59% of the machine at 60 ticks a second), a picture 276,441 to draw and 126,203 to convert. The previous
+port's backlog is in history/llb/PIPELINE.md.
 
 | Priority | Item | Why |
 | --- | --- | --- |
-| 1 | The sound processor out of the per-tick logic | 86% of the logic time is the Z80 interpreter |
-| 2 | Cheaper translated code for the main CPU: registers by direct access, dead flags dropped, direct RAM access | ~53 colour clocks per instruction now |
-| 3 | 68k back end for the main CPU | the NES port's was 3x faster than its C |
-| 4 | A display at 1:1 with a black border (the user's choice), then a faster one than C2P of every pixel | 25-30 frames a picture now |
-| 5 | Sound: the driver's chip writes converted on the host, played on Paula | no sound now |
-| 6 | Trace the rest of the game (other courses, modes) | untraced code stops the port |
+| 1 | 68k back end for the main CPU (registers in 68k registers, flags in the CCR where they match) | logic is 59% of the machine; the NES port's 68k code was 3x its C |
+| 2 | The display's overlay and sprite loops in assembly; convert only rows that changed | 400k colour clocks a picture |
+| 3 | Sound: the real driver's chip writes recorded per command on the host, played on Paula | no sound now |
+| 4 | Passes that take more than 8 frames (scene changes): spread the cell redraws | the cause of the lost game time |
+| 5 | Trace the rest of the game (other courses, modes) | untraced code stops the port |
+| 6 | Why the profiling build does not finish 3,600 ticks | profiles of play need it |

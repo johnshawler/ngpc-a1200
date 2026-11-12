@@ -9,10 +9,11 @@ checksum and the profiler.
 
 A new session remembers nothing but this file and the tools next to it. To start a port see `KICKOFF-NGPC.md`.
 
-State of the tools (2026-11, after bringing them up on one game, Neo Turf Masters): a game can be run, looked
-at, measured, traced, translated to C and proven equal to the interpreter on the host, and built and run on the
-emulated A1200. What a finished port still needs is listed plainly in section 8: a fast display, sound, and
-faster code than the C translation gives.
+State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
+translated to C and proven equal to the interpreter on the host; its sound program is replaced by a model of what
+the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in a
+black border, and the referee passes it as a per-pixel game (8.7 pictures a second, game time at 74% of the clock).
+What a finished port still needs is in section 8: faster logic (a 68k back end), a faster display, and sound.
 
 ## 1. What is reusable, what is per game
 
@@ -21,9 +22,10 @@ faster code than the C translation gives.
 | CPU | `tools/tlcs900.py` (decoder, formatter), `tools/dis900.py`, `tools/asm900.py`, `src/ngpc/cpu900.h` (interpreter and the primitives the translation is built from), `src/ngpc/cycles900.h` | use as is |
 | Reference machine | `tools/ngpref/ngpref.c` (timed machine: CPU, Z80, timers, interrupts, BIOS calls in C, pictures), `src/ngpc/z80.h`, `src/ngpc/k2ge.c` | use; extend for what the game uses (section 8) |
 | Translator | `tools/recomp900.py` | use; add native instruction forms the report asks for |
-| Port machine and frame model | `src/ngpc/ngp.{c,h}`, `src/ngpc/logic.{c,h}`, `src/ngpc/run_c.c`, `src/coro.{h,s}`, `src/coro_host.c` | use as is |
-| Proof | `src/ngpc/run_interp.c`, `src/ngpc/host_test.c`, `tools/verify_ngpc.sh` | use as is |
-| Amiga side | `src/ngpc/main.c` (kit skeleton, first display) | replace the display (section 7) |
+| Port machine and frame model | `src/ngpc/ngp.{c,h}` (with the sound processor's model), `src/ngpc/gen900.h` (what the generated code is written in), `src/ngpc/logic.{c,h}`, `src/ngpc/run_c.c`, `src/coro.{h,s}`, `src/coro_host.c` | use; a game with another sound driver needs its own model (section 4) |
+| Proof | `src/ngpc/run_interp.c`, `src/ngpc/host_test.c` (`-k` checks the renderers), `tools/verify_ngpc.sh`, `tools/check_sound_ngpc.sh` | use as is |
+| Amiga side | `src/ngpc/main.c` (kit skeleton, the picture at 1:1 in a black border), `src/ngpc/k2ge.c` (`k2ge_frame_cached`) | use; a faster display is section 7 |
+| Measuring on the Amiga | `tools/prof_ngpc.sh` (1 kHz profiler, names static functions too), `tools/long_bench.sh` | use as is |
 | Starting a port | `tools/new_port_ngpc.sh`, `tools/make_assets_ngpc.sh`, `port.ngpc.conf`, `skills/amiga-ngpc-port/SKILL.md` | run once / install once |
 | Per game | `tools/games/<game>.py`, `game_bench_input` in `src/ngpc/logic.c`, the flow files `tools/flow_ngpc/<game>_*.txt`, `original/README.md` | write new |
 | Checks of the tools themselves | `tools/ngpref/check_tables.py`, `tools/ngpref/test_asm.py`, `tools/ngpref/README.md` | run after changing the tables |
@@ -47,11 +49,15 @@ faster code than the C translation gives.
        ./ngpref ... -s -w <main wait loop addresses> -W <sound program idle loop addresses>
 
    Do it per scene. Write the numbers and the verdict (section 6) in the feasibility note.
-5. Trace with `-c tools/flow_ngpc/<game>_<scene>.txt` over every scene you can reach, then
-   `tools/make_assets_ngpc.sh` and `tools/verify_ngpc.sh <ticks>`: the translation must equal the interpreter
-   after every tick. Only then the Amiga.
-6. `tools/port.sh fast` (and `tools/port.sh` if the game fits a stock machine). `tools/long_bench.sh` runs a
-   port that is still too slow for the referee's time limit.
+5. **What does the game read from its sound processor?** `./ngpref ... -m` lists every instruction of the main
+   CPU that touches the shared RAM or the ports 0xB8-0xBC. Neo Turf Masters reads two things: the answer byte and
+   a tick counter (section 4). If a new game reads more, extend the model in `ngp.c` or give it its own.
+6. Trace with `-c tools/flow_ngpc/<game>_<scene>.txt` over every scene you can reach, then
+   `tools/make_assets_ngpc.sh`, `tools/verify_ngpc.sh <ticks>` (the translation must equal the interpreter after
+   every tick) and `tools/check_sound_ngpc.sh <ticks>` (the sound model must equal the real sound program as the
+   game sees it). Only then the Amiga.
+7. `tools/port.sh fast` (and `tools/port.sh` if the game fits a stock machine), then `tools/prof_ngpc.sh` to see
+   where the time goes. `tools/long_bench.sh` runs a port that is still too slow for the referee's time limit.
 
 ## 3. The machine, as far as a port needs it
 
@@ -82,21 +88,24 @@ sound processor's frame of time, and the interrupts it raised.
   finds these loops by itself (`wait_kind` in `tools/recomp900.py`), also `HALT`. Check its list
   (`src/ngpc/gen_waits.h`) against the profile of a quiet frame (`ngpref -p`).
 - **Polls.** A loop that re-reads the same memory and counts a register down is waiting for the *other
-  processor* with a timeout. Neo Turf Masters does this for every answer of its sound program, and without a
-  running Z80 it never gets past its logo. There the sound processor gets a slice of time; after 4,096 polls in
-  a row the frame ends.
-- **The sound program is part of the logic.** It answers the game through shared RAM, so it must run in the
-  host test and on the Amiga. It idles in polling loops that use its whole processor. `ngp.c` skips that time
-  by itself: when the Z80 comes back to the head of a loop in exactly the state it had there before, with
-  nothing written by either processor, it would go round until something changes. Skipping moves the sound
-  processor's own variables slightly (its interrupts arrive at another point of the loop); over the 3,600-tick
-  bench of Neo Turf Masters the game's RAM and the K2GE's memory were identical with and without it
-  (`-DNGP_NO_IDLE_SKIP` builds without).
-- **The frame model has no clock inside a frame.** The game starts the Z80 and soon sends it an NMI; on the
-  console the Z80 has run its start-up code by then. In the model it has not run at all, took the NMI with no
-  stack and crashed, silently: the game went on. So before an NMI the model lets the Z80 run until it idles.
-  Check that the sound program is alive: `host_test N -v` prints its instructions per tick, and a profile of
-  it must show its idle loop, not address 0x0038 and 0xFFFF.
+  processor* with a timeout. Neo Turf Masters does this for every answer of its sound program. There the sound
+  processor gets a slice of time; after 4,096 polls in a row the frame ends.
+- **The sound processor is part of the logic, as events.** It answers the game through shared RAM, so the game
+  cannot run without it. The frame model gives it time in fixed amounts (a frame, a poll); that time decides when
+  its timer interrupts fall, and what it does in answer to an event (started, a timer interrupt, an NMI from the
+  main CPU) is done at once. On the console that takes some hundred microseconds and the game waits anyway.
+- **A model of the sound driver, not a Z80.** All the main CPU of Neo Turf Masters sees of its sound program is:
+  a command byte written to 0xBC with an NMI is answered with its complement; command 0xFF restarts the driver
+  (answer 0, then one interrupt to the main CPU); every timer interrupt advances a counter at 0x70DE. `ngp.c`
+  implements exactly that (read from the Z80 code; SNK's driver, so other SNK games may share it).
+  `tools/check_sound_ngpc.sh` builds the host test once with the model and once with the real sound program on the
+  Z80 interpreter (`-DNGP_Z80_INTERP`) and compares everything the main CPU can see after every tick: equal for
+  3,600 ticks. A game with another driver: `ngpref -m` says what it reads; write its model the same way and prove
+  it the same way. The interpreter build is the fallback (on the host only: on the Amiga it cost 249 colour
+  clocks a Z80 instruction, 86% of the logic).
+- **Check that the real sound program is alive** in the interpreter build: `host_test N -v` prints its
+  instructions per tick. A first version of the model let the game's first NMI hit the Z80 before it had run its
+  start-up code; it crashed silently and only a strange profile (addresses 0x0038 and 0xFFFF) showed it.
 - **Lag.** With the reference machine, check that the original finishes its work within a frame in the busy
   scenes (`-s`: busy states stay under 102,485). If it does not, game time on the console is slower there and
   the frame model would need cycle budgets. Neo Turf Masters: at most 65% of a frame in the bench.
@@ -114,21 +123,29 @@ sound processor's frame of time, and the interrupts it raised.
   C function, which returns the address where execution goes on. A caller that gets back another address than
   its own continuation returns it upward. A jump to another function is a tail call; a jump through a register
   is a `switch` over the targets the traces saw at that instruction.
-- **One place for every flag.** The generated C is built from the primitives of `src/ngpc/cpu900.h`
-  (`cpu_alu`, `cpu_rd`, `cpu_setr`, ...): the same functions the interpreter uses. An instruction form the
-  translator has no native code for is run by the interpreter's `cpu_step()` on the spot (`STEP`): always
-  right, slower. The translator's report lists those forms; add the frequent ones to `native()`, each mirrors
-  its case in `cpu900.h`.
+- **What the C is written in** (`src/ngpc/gen900.h`): registers by their address through a current-bank pointer
+  (`cpu.cur`, kept by `CPU_RFP_SET()` in `cpu900.h`), so a byte or word register is one memory access on either
+  byte order; RAM, the cartridge, the stack and video memory without side effects (0x8800-0xBFFF) read and
+  written directly; everything rarer through `ngp.c`. The registers are reached as bytes and words of a long:
+  build with `-fno-strict-aliasing`.
+- **Flags live in locals and only the read ones are computed.** Liveness per function, plus two facts per
+  function that are a fixed point over the whole program: which flags it reads on entry (`in_use`) and which its
+  callers read after it returns (`ret_live`). Flags go through `cpu.sr` only at calls, returns, the step and
+  waits (an interrupt pushes SR into RAM, so all six are exact there). A game that unwinds its stack in odd ways
+  can set `PRECISE_RET = False` in its file (every return then stores all flags).
+- **Every form mirrors `cpu900.h`.** An instruction form without native code runs through the interpreter's
+  `cpu_step()` on the spot (`STEP`): always right, slower. The translator prints how many and which.
 - **Proof**: `tools/verify_ngpc.sh N` builds the host test twice from the same machine and frame model, once
-  with the generated code and once with the interpreter, and compares RAM and K2GE memory after every tick.
-  It prints the first tick and offset that differ. Run it after every change of the translator.
+  with the generated code and once with the interpreter, and compares RAM, the K2GE, the ports and the registers
+  after every tick. It prints the first tick and place that differ. Run it after every change of the translator.
   Setting `NATIVE = False` in the game file sends every instruction through the step: if the difference goes
-  away, the bug is in a native form; if not, it is in the control flow.
+  away, the bug is in a native form; if not, it is in the control flow. The Amiga is big-endian and the host is
+  not: the Amiga checksum against the host's is the proof of the byte order.
 - An address register of `(-r)` and `(r+)` moves *before* the operation (as in `cpu900.h`): the generated
-  code computes the address first for the same reason.
-- `LDIR` and its kind re-execute themselves: the step is repeated until the address moves on.
-- What the C translation costs on the Amiga is in section 6. Registers go through memory in it: the NES port
-  needed a 68k back end for the same reason (`tools/back68k.py` is the worked example).
+  code computes the address first for the same reason. `LDIR` and its kind re-execute themselves.
+- **What it costs** (section 6): the registers are still in memory, so gcc reloads them after every store. The
+  next step is a 68k back end that keeps them in 68k registers (`tools/back68k.py` of the NES port is the worked
+  example: its 68k code ran three times faster than its C).
 
 ## 6. The verdict, before writing code
 
@@ -138,63 +155,67 @@ Two numbers decide: the memory, and the instructions per frame of *both* process
 | --- | --- |
 | Cartridge data | 1,544 KB of a 2 MB image: does not fit a stock A1200 at all |
 | Main CPU, per frame, outside its wait loop | median 1,700-3,900 instructions (9-21% of the console's CPU), 90th percentile about 5,200, 13,100 at scene changes |
-| Sound program, per frame, outside its idle loop | median 1,500-4,200 instructions while music plays, up to 6,200; 4 interrupts a frame |
+| Sound program, per frame, outside its idle loop | median 1,500-4,200 instructions while music plays, up to 6,200; 4 interrupts a frame. The game reads only two of its answers: a model replaces it (section 4) |
 | Interrupts of the main CPU | vertical blank only |
 
-What an instruction costs on the emulated A1200 with 4 MB fast RAM, as the tools are now (from two benches of
-different mix, 300 and 900 ticks, solved for the two unknowns):
+What it costs on the emulated A1200 with 4 MB fast RAM, step by step (logic: colour clocks a tick over the first 900
+ticks of the bench; a frame has 71,051, and 60 ticks a second need 1.2 a frame):
 
-| | Colour clocks each | A frame has 71,051 |
-| --- | --- | --- |
-| Main CPU instruction, C translation (registers in memory) | about 53 | 2,000 instructions a tick are 1.5 frames |
-| Sound program instruction, through the Z80 interpreter | about 249 | 2,600 instructions a tick are 9 frames |
+| State | Logic a tick |
+| --- | --- |
+| C translation, registers through generic functions, sound program on the Z80 interpreter | 764,273 |
+| The sound processor as events, and a model of its driver instead of the Z80 (section 4) | 178,759 |
+| Flags in locals with liveness, registers by address, direct memory (`gen900.h`) | 43,478 |
+| Video memory written directly by the translated code | 31,325 |
 
-So today the sound program is 86% of the logic time, and the logic alone is ten times too slow. Neither number
-is the end of the road: the interpreter is a stopgap, and the NES port's 68k back end ran its translated code
-three times faster than its C back end. What a 68k back end and a translated sound program reach on this
-machine has not been measured. The console's CPU does up to 16,000 instructions a frame, and they are 16- and
-32-bit instructions: it is not a slower processor than a 14 MHz 68EC020, so expect a game that keeps it busy
-to need more than a stock A1200, and say so in the report from the start.
+Over the whole 3,600-tick bench, logic averages 35,184 colour clocks a tick: at 60 ticks a second that is 59% of
+the machine before any picture is drawn. The console's CPU does up to 16,000 instructions a frame and they are 16-
+and 32-bit instructions: it is not a slower processor than a 14 MHz 68EC020. Plan for fast RAM and say so in the
+report from the start.
 
 ## 7. Display and sound: what exists, what to build
 
-**Exists: the first display** (`src/ngpc/main.c`). It computes every pixel from the K2GE's memory
-(`k2ge_line_idx`: the 256 palette entries are the 256 pens of an 8-plane screen) and converts with the kit's
-C2P routine, each pixel two Amiga pixels wide. It is right for every game the renderer is right for, and far
-too slow to play: it exists so that the Amiga build can be checked against the reference pictures early
-(`CLASS=perpixel` in the port description: no 50 Hz gate).
+**Exists: the picture at its own size in a black border** (`src/ngpc/main.c`, the user's choice for Neo Turf
+Masters; doubled it would need 304 lines, which a PAL screen does not have). 8 planes: the K2GE's 256 palette
+entries are the 256 pens, so a colour change is a palette load and nothing is redrawn. The picture is drawn into a
+160 x 152 byte buffer and converted with the kit's 1x1 chunky-to-planar routine, one row at a time, into the middle
+of the 320 x 256 screen. Pictures are drawn only when the game changed the K2GE's memory, and converted only into a
+buffer that does not show them yet.
 
-**To build for a real port (not done, design only):**
+The renderer (`k2ge_frame_cached` in `src/ngpc/k2ge.c`) keeps both scroll planes drawn in 256 x 256 pen buffers and
+redraws only the cells and characters the game changed (the writes mark them: `ngp_vidw` in `ngp.h`). A picture is
+then 160-pixel windows of the two planes laid over each line four pixels at a time, with the sprites between, back
+to front. `host_test -k` proves it, and `k2ge_frame_idx` (the same picture without the cache), equal to
+`k2ge_line_idx` (the reference) after every tick.
 
-- The picture is 160 x 152 in a 320 x 256 screen: shown 1:1 it covers a quarter of the screen; doubled it
-  would need 304 lines, which a PAL screen does not have. Decide with the user: 1:1 with a border, or double
-  width only (distorted), or double both ways and lose 24 lines.
-- A planar display in the brief's sense, per game, from what the reference machine shows the game doing:
-  which plane scrolls, how many palettes each layer uses at once, how many sprites, whether priorities matter.
-  One scroll plane as the hardware-scrolled playfield with tiles streamed in (the 32 x 32 map wraps: keep an
-  unwrapped copy, as the NES port did); the other plane as stamps when it stands still (a status display) or
-  as the second playfield of a dual-playfield screen (the kit has none: that is kit work); sprites as hardware
-  sprites, clustered into attached pairs and reused down the screen (`src/video.c` of the NES port does
-  exactly this and is the code to start from). 16 palettes of 3 colours per layer do not fit 15 sprite colours
-  unless the game uses few of them at once: measure it.
-- Raster effects (timer 0 on horizontal blanks) need the frame model to deliver timer interrupts and the
-  display to change registers down the screen: neither exists.
+| Measured (fast RAM, 3,600-tick bench) | Colour clocks a picture |
+| --- | --- |
+| `k2ge_line_idx` line by line (first version) | 670,310 (900 ticks) |
+| `k2ge_frame_idx`, lookup tables, long writes | 406,621 (900 ticks) |
+| `k2ge_frame_cached` | 276,441 drawn (305 of them), conversion 126,203 (329) |
 
-**Sound (not done).** The Amiga build runs the sound program but nothing listens to its writes to the sound
-chip (`ngp_io[0xA0]`, `ngp_io[0xA1]` hold the last bytes). The route: decode the T6W28 writes into four voices
-(three squares, noise) and play them on Paula with looped one-period waveforms, as `src/sound.c` does for the
-NES's sound chip; each voice's left and right volume must be folded into Paula's fixed left and right
-channels. DAC samples need a sample player on a Paula channel.
+Next for the display, by expected gain: the overlay and sprite loops in assembly; convert only rows that changed;
+a planar display per game in the brief's sense (one scroll plane hardware-scrolled, the other as stamps or as a
+dual playfield the kit does not have yet, sprites as hardware sprites clustered as `src/video.c` of the NES port
+does). Raster effects (timer 0 on horizontal blanks) need the frame model to deliver timer interrupts and the
+display to change registers down the screen: neither exists.
+
+**Sound (not done).** With the model there is no Z80 on the Amiga, so the music has to come from somewhere else.
+The route that fits the brief: run the real sound program on the host (`-DNGP_Z80_INTERP`) for each command the game
+sends, record its writes to the sound chip (`ngp_io[0xA0]`, `0xA1`) as a stream per command, convert the streams
+into something Paula plays (looped one-period waveforms per voice, as `src/sound.c` does for the NES, or samples),
+and play the stream that belongs to each command the model receives. Each voice's left and right volume must be
+folded into Paula's fixed left and right channels. DAC samples need a sample player on a Paula channel.
 
 ## 8. Not done yet (do it when a game needs it; the tools say when)
 
-- **Speed.** The translation is C with the registers in memory, and the sound program runs through the Z80
-  *interpreter* (`src/ngpc/z80.h`) on the Amiga too. The second is against the brief's rule and is only there
-  so that the logic is complete and provable: the next step for any port is to translate the sound program
-  (it is 4 KB and never changes) and to give the main CPU a 68k back end. Section 9 has the measured cost.
-- **A fast display and sound** (section 7).
-- **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data
-  cut down to what it reads (the reference machine could log that; it does not yet).
+- **Speed of the logic.** The C translation keeps the registers in memory. A 68k back end is the next step
+  (section 5).
+- **Speed of the display** (section 7), and **sound** (section 7).
+- **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data cut
+  down to what it reads (the reference machine could log that; it does not yet).
+- **The profiler build hangs on long runs** (3,600 ticks with fast RAM did not finish in 15 minutes; 900 ticks
+  work). Profile up to 900 ticks, or find the cause in `src/prof68k.s` (its buffer fills after 65 seconds).
 - Main CPU timer interrupts and raster effects, micro DMA, the serial link, the real-time clock (a fixed date
   is returned), flash writes (saved games are accepted and forgotten), the mono mode of games without colour,
   code a game copies to RAM, `SWI` other than 1.
@@ -232,6 +253,15 @@ sections above if a lesson is general.
   the model). It showed only as a strange load: 7,300 Z80 instructions every tick, at addresses 0x0038 and
   0xFFFF. Fixing it made the Amiga logic 7 times cheaper. The game's own state looked fine all along: the
   checksum cannot show a fault that both sides share.
+- Second session: the sound program out of the logic (a model of its protocol, proven against it), the C
+  translation rewritten (flags in locals with liveness, registers by address), video memory written directly,
+  the picture at 1:1 in a black border with a cached renderer, a profiler that names static functions. Logic
+  from 764,273 to 31,325 colour clocks a tick over 900 ticks (24 times less), a picture from 25-30 frames to about
+  6. Referee: PASS as a per-pixel game, 8.7 pictures a second, game time at 74% of the clock, checksum equal.
+- What paid most, in order: the sound processor (the game needed two of its answers, not its 2,900 instructions a
+  tick); flags computed only where read; the game's own copies into video memory taking the generic path.
+  Each time the profiler pointed at it, not a guess.
 - Next time: do the memory check and the two load numbers before anything else (they took minutes once the
-  tools existed); look at what the sound program executes in the port's frame model, not only on the reference
-  machine; translate the sound program before trying the Amiga; build the 68k back end before judging speed.
+  tools existed); run `ngpref -m` on day one: what the game reads from its sound processor decides between a
+  model and a translation; profile before optimising (`tools/prof_ngpc.sh`); build the 68k back end before judging
+  speed.

@@ -32,11 +32,14 @@ def main():
             want = opt[key].lower().zfill(8)
             if f['checksum'].lower().zfill(8) != want: problems.append('checksum %s differs from the %s %s' % (f['checksum'], name, want))
     print('frames=%s late=%s worst_pct=%s avg_pct=%s shown_fps=%s ticks=%s checksum=%s' % (f['frames'], f['late'], f['worst_pct'], f.get('avg_pct', '?'), f['shown_fps'], f['ticks'], f['checksum']))
+    if 'game_speed' in f: print('game_speed=%s%%: game time against the clock (100 = kept)' % f['game_speed'])
     if not opt.get('--host') and not opt.get('--expect'): print('note: no host test in port.conf, so the checksum was not compared')
     if problems:
         for p in problems: print('FAIL:', p)
         return 1
-    print('PASS (%s)' % ('50 Hz held' if cls == 'planar' else 'per-pixel game: %s pictures a second, logic by the clock' % f['shown_fps']))
+    speed = ('logic by the clock' if int(f.get('game_speed', '100')) >= 99 else
+             'game time at %s%% of the clock: it falls behind where a pass takes more than 8 frames' % f['game_speed'])
+    print('PASS (%s)' % ('50 Hz held' if cls == 'planar' else 'per-pixel game: %s pictures a second, %s' % (f['shown_fps'], speed)))
     return 0
 
 sys.exit(main())
