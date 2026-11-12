@@ -256,6 +256,10 @@ still shows the newest picture; the number of new pictures is `pics=` (drawn) in
 changes per tick from the interpreter, costs from the bench) chose the rule; it predicts game time too high (it
 uses average costs) but ranks the choices right.
 
+Tried and dropped: a cache of decoded characters for `draw_cell` (per character and mirroring, dropped when the game
+changes it) made no difference in Neo Turf Masters (182.8k against 182.3k colour clocks a picture): its characters
+change about as often as the cells that show them are drawn.
+
 Next for the display, by expected gain: `draw_cell`, the overlay and sprite loops in assembly;
 a planar display per game in the brief's sense (one scroll plane hardware-scrolled, the other as stamps or as a
 dual playfield the kit does not have yet, sprites as hardware sprites clustered as `src/video.c` of the NES port
