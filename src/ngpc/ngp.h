@@ -17,7 +17,6 @@ extern uint8_t ngp_pad;                 /* controller: bit 0 up, 1 down, 2 left,
 extern uint32_t ngp_fatal_pc; extern int ngp_fatal_why;       /* set when the program reached something not translated */
 extern uint32_t ngp_frames;             /* frames (ticks) run so far */
 extern uint32_t ngp_z80_steps, ngp_cpu_steps;   /* instructions run so far: the sound program; the main CPU (interpreter only) */
-extern uint8_t ngp_z80_skip;            /* 1 (default): the sound program's idle loops are skipped */
 
 uint8_t ngp_rd_slow(uint32_t a);        /* everything that is not RAM or ROM */
 void    ngp_wr_slow(uint32_t a, uint8_t v);
@@ -38,12 +37,13 @@ static inline void mem_w8(uint32_t a, uint8_t v)
 void ngp_init(const uint8_t *rom, uint32_t len, const uint8_t *font);  /* the state the BIOS leaves when it starts a game */
 void ngp_bios_call(unsigned n);         /* system call n, parameters in the registers of bank 3 */
 int  ngp_bios_at(uint32_t pc);          /* the system call that lives at this BIOS address, or -1 */
-void ngp_fatal(uint32_t pc, int why);   /* 1 not an instruction, 2 unknown entry point, 3 jump into the BIOS, 4 interrupt handler did not return */
+void ngp_fatal(uint32_t pc, int why);   /* 1 not an instruction, 2 unknown entry point, 3 jump into the BIOS, 4 interrupt handler
+                                           did not return, 5 the sound program (interpreter build) never came back to an idle loop */
 
 /* The frame model (src/ngpc/logic.c) calls these; they never run translated code themselves. */
 void ngp_frame_start(void);             /* controller into RAM, vertical blank pending */
 int  ngp_irq_next(void);                /* the next interrupt the CPU would take now: its number in the RAM vector table, or -1 */
 uint32_t ngp_irq_enter(int idx);        /* push pc and SR, raise the mask: returns the handler's address */
-void ngp_z80_frame(void);               /* run the sound processor for one frame */
-void ngp_z80_slice(void);               /* ... for a short while: the main program is polling for its answer */
+void ngp_z80_frame(void);               /* the sound processor's time for one frame passes */
+void ngp_z80_slice(void);               /* ... a little of it: the main program is polling for its answer */
 #endif

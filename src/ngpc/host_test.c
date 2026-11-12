@@ -5,7 +5,8 @@
  *
  *   host_test N            print the checksum after N ticks
  *   host_test N -v         also print the checksum every 100 ticks (to find the first tick that differs)
- *   host_test N -r file    also write work RAM and the K2GE's memory after every tick to file
+ *   host_test N -r file    also write the machine after every tick to file: RAM 0x4000-0x7FFF (16 KB), the K2GE
+ *                          (16 KB), the ports (256 bytes), the registers (88 bytes: 20 longs, SR, F', stop reason, pc)
  *   host_test N -d t1,t2   also write the picture after these ticks as host_NNNNN.ppm
  * The cartridge is assets/rom.bin and the BIOS's character set assets/font.bin (tools/make_assets_ngpc.sh).
  */
@@ -13,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ngp.h"
+#define CPU900_EXTERN
+#include "cpu900.h"
 #include "logic.h"
 #include "k2ge.h"
 
@@ -52,7 +55,13 @@ int main(int argc, char **argv)
     for (t = 0; t < n; t++) {
         game_tick(game_bench_input(t));
         if (verbose && (t + 1) % 100 == 0) printf("tick %u checksum %08x\n", t + 1, (unsigned)game_checksum());
-        if (ramlog) { fwrite(ngp_ram, 1, sizeof ngp_ram, ramlog); fwrite(ngp_vid, 1, sizeof ngp_vid, ramlog); }
+        if (ramlog) {
+            uint8_t r[88]; int i, j;
+            for (i = 0; i < 20; i++) { uint32_t v = i < 16 ? cpu.bank[i >> 2][i & 3] : cpu.gpr[i - 16]; for (j = 0; j < 4; j++) r[i * 4 + j] = (uint8_t)(v >> (8 * j)); }
+            r[80] = (uint8_t)cpu.sr; r[81] = (uint8_t)(cpu.sr >> 8); r[82] = cpu.f2; r[83] = (uint8_t)ngp_fatal_why;
+            for (j = 0; j < 4; j++) r[84 + j] = (uint8_t)(cpu.pc >> (8 * j));
+            fwrite(ngp_ram, 1, sizeof ngp_ram, ramlog); fwrite(ngp_vid, 1, sizeof ngp_vid, ramlog); fwrite(ngp_io, 1, sizeof ngp_io, ramlog); fwrite(r, 1, 88, ramlog);
+        }
         if (dumps) { snprintf(key, sizeof key, ",%u,", t + 1); snprintf(list, sizeof list, ",%s,", dumps); if (strstr(list, key)) { snprintf(name, sizeof name, "host_%05u.ppm", t + 1); picture(name); } }
         if (ngp_fatal_why) { fprintf(stderr, "STOPPED at tick %u: reason %d at %06x\n", t + 1, ngp_fatal_why, (unsigned)ngp_fatal_pc); break; }
     }

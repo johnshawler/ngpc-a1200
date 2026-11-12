@@ -12,6 +12,8 @@
  *     -z file           write the Z80's 4 KB (the sound program) each time the game starts the Z80
  *     -W a1,a2,...      like -w for the Z80: addresses (hex) of the sound program's idle loop
  *     -p f1,f2,...      for these frames print where the instructions went (the 12 busiest addresses): shows wait loops
+ *     -m                at the end, list every place where the main CPU touches the sound processor: reads and
+ *                       writes of the shared RAM (0x7000-0x7FFF) and of its ports (0xB8-0xBC), by instruction address
  *     -t                trace every instruction (huge)
  *
  * What it models: the CPU with its timing, work RAM, the K2GE with scanline timing and a picture per frame,
@@ -57,6 +59,15 @@ static unsigned uses;                   /* bit set of features a game touched th
 #define USE_PSG 32
 #define USE_DAC 64
 static uint32_t waitpc[32]; static int nwait;
+static uint32_t cur_pc; static int commlog;       /* -m */
+static struct { uint32_t pc, a; char rw; long n; uint8_t first, last; } comm[4096]; static int ncomm;
+static void comm_note(uint32_t a, char rw, uint8_t v)
+{
+    int i;
+    if (!commlog || cur_pc >= 0xff0000) return;
+    for (i = 0; i < ncomm; i++) if (comm[i].pc == cur_pc && comm[i].a == a && comm[i].rw == rw) { comm[i].n++; comm[i].last = v; return; }
+    if (ncomm < 4096) { comm[ncomm].pc = cur_pc; comm[ncomm].a = a; comm[ncomm].rw = rw; comm[ncomm].n = 1; comm[ncomm].first = comm[ncomm].last = v; ncomm++; }
+}
 static uint32_t *prof; static int profiling;      /* instructions per address in this frame */
 static unsigned bios_used;
 
@@ -76,7 +87,14 @@ static void set_tff3(int v);
 static void z80_start(void);
 static void z80_nmi(void);
 
+static uint8_t mem_r8_(uint32_t a);
 static uint8_t mem_r8(uint32_t a)
+{
+    uint8_t v = mem_r8_(a);
+    if ((a >= 0x7000 && a < 0x8000) || (a >= 0xb8 && a <= 0xbc)) comm_note(a, 'r', v);
+    return v;
+}
+static uint8_t mem_r8_(uint32_t a)
 {
     if (a < 0x100) {
         switch (a) {
@@ -105,6 +123,7 @@ static uint8_t mem_r8(uint32_t a)
 }
 static void mem_w8(uint32_t a, uint8_t v)
 {
+    if ((a >= 0x7000 && a < 0x8000) || (a >= 0xb8 && a <= 0xbc)) comm_note(a, 'w', v);
     if (a < 0x100) {
         switch (a) {
         case 0x20: if (!(v & 1)) tcount[0] = 0; if (!(v & 2)) tcount[1] = 0; if (!(v & 4)) tcount[2] = 0; if (!(v & 8)) tcount[3] = 0; break;
@@ -303,6 +322,7 @@ static int step(void)
         fprintf(stderr, "frame %d: jump into the BIOS at %06x, which is not a system call\n", frame, pc0); exit(1);
     }
     flow('E', pc0, 0);
+    cur_pc = pc0;
     if (trace) printf("%06x  XWA %08x XBC %08x XDE %08x XHL %08x XIX %08x XIY %08x XIZ %08x XSP %08x SR %04x\n", pc0,
                       cpu.bank[CPU_RFP][0], cpu.bank[CPU_RFP][1], cpu.bank[CPU_RFP][2], cpu.bank[CPU_RFP][3], cpu.gpr[0], cpu.gpr[1], cpu.gpr[2], cpu.gpr[3], cpu.sr);
     {   uint8_t f = mem_r8(pc0), s2 = mem_r8((pc0 + 1) & 0xffffff);
@@ -405,6 +425,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-r") && i + 1 < argc) ramlog = argv[++i];
         else if (!strcmp(argv[i], "-w") && i + 1 < argc) { char *p = argv[++i]; while (*p && nwait < 32) { waitpc[nwait++] = (uint32_t)strtoul(p, &p, 16); if (*p == ',') p++; } }
         else if (!strcmp(argv[i], "-s")) stats = 1;
+        else if (!strcmp(argv[i], "-m")) commlog = 1;
         else if (!strcmp(argv[i], "-t")) trace = 1;
     }
     if (ramlog) rf = fopen(ramlog, "wb");
@@ -430,6 +451,11 @@ int main(int argc, char **argv)
         if (dumps) { snprintf(key, sizeof key, ",%d,", frame); snprintf(list, sizeof list, ",%s,", dumps); if (strstr(list, key)) dump_ppm(outdir, frame); }
     }
     if (rf) fclose(rf);
+    if (commlog) {
+        int k;
+        printf("main CPU and sound processor: instruction, address, read or write, times, first and last value\n");
+        for (k = 0; k < ncomm; k++) printf("  %06x %06x %c %8ld  %02x %02x\n", comm[k].pc, comm[k].a, comm[k].rw, comm[k].n, comm[k].first, comm[k].last);
+    }
     if (flowf) fclose(flowf);
     fprintf(stderr, "%d frames, %ld instructions, %ld Z80 instructions, %ld sound chip writes. BIOS calls used:", frames, total_instr, z80_instr, psg_writes);
     for (i = 0; i < 32; i++) if (bios_used & (1u << i)) fprintf(stderr, " %d", i);

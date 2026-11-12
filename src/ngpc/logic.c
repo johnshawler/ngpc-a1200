@@ -80,9 +80,6 @@ static void ngp_main(void)
 void game_init(const uint8_t *rom, uint32_t len, const uint8_t *font)
 {
     ngp_init(rom, len, font);
-#ifdef NGP_NO_IDLE_SKIP                         /* for the check that skipping the sound program's idle time changes nothing */
-    ngp_z80_skip = 0;
-#endif
     co_init(ngp_main, co_stack, sizeof co_stack);
 }
 

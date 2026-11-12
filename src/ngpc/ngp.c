@@ -11,13 +11,12 @@ const uint8_t *ngp_rom; uint32_t ngp_rom_len; const uint8_t *ngp_font;
 uint8_t ngp_pad;
 uint32_t ngp_fatal_pc; int ngp_fatal_why;
 uint32_t ngp_frames;
-uint8_t ngp_z80_skip = 1;               /* 0: never skip the sound program's idle time (to check that skipping changes nothing) */
-uint32_t ngp_z80_steps, ngp_cpu_steps;      /* instructions run: sound program; main CPU when the interpreter runs it */
+uint32_t ngp_z80_steps, ngp_cpu_steps;      /* instructions run: sound program (interpreter build); main CPU (interpreter) */
 
 static uint8_t ipend[16];               /* by number in the RAM vector table: 5 vertical blank, 6 Z80, 7-10 timers */
-static uint8_t z80_on, tff3;
-static uint32_t z80_serial;             /* counts what the main CPU did to the sound processor: its idle loop may end */
-static int32_t z80_irq_in;              /* T-states until the next interrupt of the sound processor */
+static uint8_t snd_on, tff3;
+static uint32_t z80_serial;             /* counts what the main CPU did to the sound processor */
+static int32_t snd_irq_in;              /* T-states of the sound processor's time until its next interrupt */
 
 /* the system call table of the BIOS: the addresses games read at 0xFFFE00 and call */
 static const uint32_t sys_addr[27] = {
@@ -25,14 +24,55 @@ static const uint32_t sys_addr[27] = {
     0xff731f, 0xff70ca, 0xff17c4, 0xff1032, 0xff2bbd, 0xff2c0c, 0xff2c44, 0xff2c86, 0xff2cb4, 0xff2d27, 0xff2d33, 0xff2d3a,
     0xff2d4e, 0xff2d6c, 0xff2d85 };
 
-/* ---- the Z80 sound processor ---- */
+/* ---- the sound processor ----
+ * The frame model gives the sound processor time in fixed amounts: a frame's worth at each frame start, a little at
+ * each poll of the main CPU. That time decides when its timer interrupts fall. What it does in answer to an event
+ * (being started, a timer interrupt, an NMI from the main CPU) is done at once, before the main CPU goes on: on the
+ * console it takes some hundred microseconds, and games wait for the answer anyway.
+ *
+ * Two implementations of the same behaviour, chosen when compiling:
+ *   default          a model of what the main CPU can see of the sound program: no Z80 at all. It is what the
+ *                    Amiga runs. It holds for SNK's sound driver as Neo Turf Masters has it (see below);
+ *                    tools/check_sound_ngpc.sh proves it for a game, tick by tick, against
+ *   NGP_Z80_INTERP   the game's real sound program on a Z80 interpreter (host only).
+ */
+static void snd_start(void);            /* the main CPU switched the Z80 on: it runs its start-up code */
+static void snd_nmi(void);              /* the main CPU signalled it (NMI): a command byte waits in 0xBC */
+static void snd_irq(void);              /* timer 3's output rose: the sound processor's timer interrupt */
+
+/* T-states between two interrupts of the sound processor: timer 3's output toggles at every match, the rising
+   edge is the interrupt. 0 = none. */
+static int32_t snd_irq_period(void)
+{
+    static const uint8_t sh1[4] = { 0, 7, 11, 15 }, sh2[4] = { 7, 7, 9, 11 };
+    uint32_t t3 = ngp_io[0x27] ? ngp_io[0x27] : 256, t2 = ngp_io[0x26] ? ngp_io[0x26] : 256, m = (ngp_io[0x28] >> 2) & 3, states;
+    if (!(ngp_io[0x20] & 0x80) || !(ngp_io[0x20] & 8) || !(ngp_io[0x25] & 0x20)) return 0;
+    if (m) states = t3 << sh1[m];
+    else { if (!(ngp_io[0x20] & 4)) return 0; states = (t2 * t3) << sh2[ngp_io[0x28] & 3]; }
+    return (int32_t)states;                             /* two matches per interrupt, two CPU states per T-state */
+}
+static void snd_time(int32_t t)                         /* t T-states pass: the interrupts that fall due are taken */
+{
+    int32_t period;
+    if (!snd_on) return;
+    while ((period = snd_irq_period()) != 0) {
+        if (snd_irq_in <= 0) snd_irq_in = period;
+        if (snd_irq_in > t) { snd_irq_in -= t; return; }
+        t -= snd_irq_in; snd_irq_in = 0;
+        snd_irq();
+    }
+}
+void ngp_z80_frame(void) { snd_time(515 * 199 / 2); }
+void ngp_z80_slice(void) { snd_time(256); }
+
+#ifdef NGP_Z80_INTERP
 static uint8_t z80_wrote;
 static uint8_t z80_mr(uint16_t a) { return a < 0x1000 ? ngp_ram[0x3000 + a] : a == 0x8000 ? ngp_io[0xbc] : 0xff; }
 static void z80_mw(uint16_t a, uint8_t v)
 {
     z80_wrote = 1;
     if (a < 0x1000) ngp_ram[0x3000 + a] = v;
-    else if (a == 0x4000 || a == 0x4001) ngp_io[0xa0 + (a & 1)] = v;      /* the sound chip: the Amiga side will listen here */
+    else if (a == 0x4000 || a == 0x4001) ngp_io[0xa0 + (a & 1)] = v;      /* the sound chip */
     else if (a == 0x8000) ngp_io[0xbc] = v;
     else if (a == 0xc000) ipend[6] = 1;                                   /* interrupt to the main CPU */
 }
@@ -42,52 +82,47 @@ static void z80_out(uint16_t port, uint8_t v);
 static uint8_t z80_in(uint16_t port) { (void)port; return 0xff; }
 static void z80_out(uint16_t port, uint8_t v) { (void)port; (void)v; z80.irq_line = 0; z80_wrote = 1; }
 
-/* T-states between two interrupts of the sound processor: timer 3's output toggles at every match, the rising
-   edge is the interrupt. 0 = none. */
-static int32_t z80_irq_period(void)
-{
-    static const uint8_t sh1[4] = { 0, 7, 11, 15 }, sh2[4] = { 7, 7, 9, 11 };
-    uint32_t t3 = ngp_io[0x27] ? ngp_io[0x27] : 256, t2 = ngp_io[0x26] ? ngp_io[0x26] : 256, m = (ngp_io[0x28] >> 2) & 3, states;
-    if (!(ngp_io[0x20] & 0x80) || !(ngp_io[0x20] & 8) || !(ngp_io[0x25] & 0x20)) return 0;
-    if (m) states = t3 << sh1[m];
-    else { if (!(ngp_io[0x20] & 4)) return 0; states = (t2 * t3) << sh2[ngp_io[0x28] & 3]; }
-    return (int32_t)states;                             /* two matches per interrupt, two CPU states per T-state */
-}
-/* Run the sound program for some T-states. A sound program idles in a loop that polls for work and uses the
-   whole processor doing so. When it comes back to the head of a loop with exactly the state it had there last
-   time, having written nothing, and the main CPU has not touched it either, it will go round until something
-   changes: that time is skipped. No game knowledge is needed for it.
-   until_idle: stop at that point. The frame model has no clock inside a frame, so before the main CPU signals
-   the sound processor (an NMI) it is given the time to finish what it was doing; on the console the game's
-   own delays make sure of that. */
-static void z80_run(int32_t tstates, int until_idle)
+/* Run the sound program until it idles: a jump back to the head of a loop in exactly the state it had there the
+   last time, with nothing written by either processor since and no interrupt waiting. It would go round until
+   something changes. No game knowledge is needed for it. */
+static void z80_settle(void)
 {
     static Z80 seen; static uint32_t seen_serial; static uint8_t seen_valid;
-    if (!z80_on) return;
-    while (tstates > 0) {
-        int32_t period = z80_irq_period(), t;
+    long n;
+    for (n = 0; n < 2000000; n++) {
         uint16_t pc0;
-        if (period && z80_irq_in <= 0) { z80.irq_line = 1; z80_irq_in += period; }
-        if (z80.halted && !(z80.irq_line && z80.iff1) && !z80.nmi_pending) {       /* HALT: until its next interrupt */
-            if (until_idle) return;
-            t = (period && z80_irq_in < tstates) ? z80_irq_in : tstates;
-            if (t <= 0) t = 1;
-            tstates -= t; z80_irq_in -= t; continue;
-        }
+        int pending = (z80.irq_line && z80.iff1) || z80.nmi_pending;
+        if (z80.halted && !pending) return;
         pc0 = z80.pc;
-        t = z80_step(); ngp_z80_steps++;
-        tstates -= t; z80_irq_in -= t;
-        if (z80.pc < pc0 && ngp_z80_skip) {             /* a jump back: perhaps the head of its idle loop */
-            if (seen_valid && !z80_wrote && seen_serial == z80_serial && !memcmp(&seen, &z80, sizeof z80)) {
-                if (until_idle) return;
-                t = (period && z80_irq_in < tstates) ? z80_irq_in : tstates;
-                if (t > 0) { tstates -= t; z80_irq_in -= t; }
-            } else { memcpy(&seen, &z80, sizeof z80); seen_serial = z80_serial; seen_valid = 1; z80_wrote = 0; }
+        z80_step(); ngp_z80_steps++;
+        if (z80.pc < pc0 && !((z80.irq_line && z80.iff1) || z80.nmi_pending)) {
+            if (seen_valid && !z80_wrote && seen_serial == z80_serial && !memcmp(&seen, &z80, sizeof z80)) return;
+            memcpy(&seen, &z80, sizeof z80); seen_serial = z80_serial; seen_valid = 1; z80_wrote = 0;
         }
     }
+    ngp_fatal(0x7000 + z80.pc, 5);
 }
-void ngp_z80_frame(void) { z80_run(515 * 199 / 2, 0); }
-void ngp_z80_slice(void) { z80_run(256, 0); }
+static void snd_start(void) { z80_reset(); z80_settle(); }
+static void snd_nmi(void) { z80_settle(); z80.nmi_pending = 1; z80_settle(); }
+static void snd_irq(void) { z80.irq_line = 1; z80_settle(); }
+#else
+/* SNK's sound driver, as the main CPU can see it (read from Neo Turf Masters' sound program, Z80 addresses):
+ *  - started, it clears its variables (0x00C0-0x01E5, its tick counter at 0x00DE among them), zeroes its interrupt
+ *    count and interrupts the main CPU once (a write to 0xC000);
+ *  - its NMI handler (0x0066) queues the command byte from 0x8000 (the main CPU's 0xBC) and writes back its
+ *    complement; the command 0xFF restarts the driver (0x062C: a return to address 0);
+ *  - its timer interrupt (0x0038) counts; its main loop (0x0218) copies the count to 0x00DE.
+ * Nothing else it does is read by the main CPU (tools/ngpref -m lists what the main CPU reads). */
+static uint8_t snd_tick;
+static void snd_start(void) { snd_tick = 0; ngp_ram[0x70de - 0x4000] = 0; ipend[6] = 1; }
+static void snd_nmi(void)
+{
+    uint8_t c = ngp_io[0xbc];
+    ngp_io[0xbc] = (uint8_t)~c;
+    if (c == 0xff) snd_start();
+}
+static void snd_irq(void) { snd_tick++; ngp_ram[0x70de - 0x4000] = snd_tick; }
+#endif
 
 /* ---- memory outside RAM and ROM ---- */
 uint8_t ngp_rd_slow(uint32_t a)
@@ -119,8 +154,8 @@ void ngp_wr_slow(uint32_t a, uint8_t v)
         case 0x71: if (!(v & 0x08)) ipend[5] = 0; if (!(v & 0x80)) ipend[6] = 0; break;
         case 0x73: if (!(v & 0x08)) ipend[7] = 0; if (!(v & 0x80)) ipend[8] = 0; break;
         case 0x74: if (!(v & 0x08)) ipend[9] = 0; if (!(v & 0x80)) ipend[10] = 0; break;
-        case 0xb9: if (v == 0x55) { z80_on = 1; z80_reset(); z80_irq_in = 0; } else if (v == 0xaa) z80_on = 0; z80_serial++; break;
-        case 0xba: z80_run(515 * 199 / 2, 1); z80.nmi_pending = 1; z80_serial++; break;    /* at most a frame's time to get ready */
+        case 0xb9: z80_serial++; if (v == 0x55) { ngp_io[a] = v; snd_on = 1; snd_irq_in = 0; snd_start(); } else if (v == 0xaa) snd_on = 0; break;
+        case 0xba: z80_serial++; ngp_io[a] = v; if (snd_on) snd_nmi(); return;
         case 0xbc: z80_serial++; break;
         }
         ngp_io[a] = v; return;
@@ -207,7 +242,7 @@ void ngp_init(const uint8_t *rom, uint32_t len, const uint8_t *font)
     ngp_rom = rom; ngp_rom_len = len; ngp_font = font;
     memset(ngp_ram, 0, sizeof ngp_ram); memset(ngp_vid, 0, sizeof ngp_vid); memset(ngp_io, 0, sizeof ngp_io);
     memset(&cpu, 0, sizeof cpu); memset(ipend, 0, sizeof ipend);
-    z80_on = 0; tff3 = 0; z80_serial = 0; z80_irq_in = 0; ngp_frames = 0; ngp_fatal_why = 0; ngp_pad = 0;
+    snd_on = 0; tff3 = 0; z80_serial = 0; snd_irq_in = 0; ngp_frames = 0; ngp_fatal_why = 0; ngp_pad = 0;
     cpu.pc = (rom[0x1c] | rom[0x1d] << 8 | rom[0x1e] << 16) & 0xffffff;
     cpu.sr = 0xf800;
     cpu.gpr[0] = 0xff23c3; cpu.gpr[1] = 0xff23df; cpu.gpr[2] = 0x006480; cpu.gpr[3] = 0x6c00;
