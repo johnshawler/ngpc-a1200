@@ -1,4 +1,9 @@
-# Amiga 1200 port template
+# Amiga 1200 port template: Neo Geo Pocket Color
+
+This repository is the template for porting **Neo Geo Pocket Color** games to the Amiga 1200, made from
+[a1200-final](https://github.com/johnshawler/a1200-final) (the NES template) and keeping all of it. Its current port is
+Neo Turf Masters: `REPORT.txt`, `PLAYBOOK-NGPC.md`. To start the next one see `KICKOFF-NGPC.md`. The NES port that
+came before is in `history/llb/`.
 
 A starting point for porting one game to a stock Commodore Amiga 1200 at full speed, set up so that a coding
 model can do the port. It holds the instructions (`BRIEF.md`), a tested kit (`kit/`, `tools/`), and a referee
@@ -27,8 +32,8 @@ once, on the host, and prove the translation against an interpreter tick by tick
 
 | Console | Start here | State |
 | --- | --- | --- |
-| NES / Famicom (6502) | `KICKOFF.md`, `PLAYBOOK-NES.md`, `tools/new_port.sh` | one port made: Little League Baseball (`REPORT.txt`) |
-| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | tools brought up on Neo Turf Masters (`REPORT-NGPC.txt`): correct on the emulated Amiga, not yet fast, no sound |
+| NES / Famicom (6502) | `KICKOFF.md`, `PLAYBOOK-NES.md`, `tools/new_port.sh` | one port made: Little League Baseball (`history/llb/REPORT.txt`) |
+| Neo Geo Pocket Color (TLCS-900/H) | `KICKOFF-NGPC.md`, `PLAYBOOK-NGPC.md`, `tools/new_port_ngpc.sh` | Neo Turf Masters in progress (`REPORT.txt`): correct on the emulated Amiga, not yet fast, no sound |
 
 ## What is here
 

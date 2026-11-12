@@ -1,40 +1,55 @@
 PORT REPORT
-Game:                  Little League Baseball: Championship Series (SNK 1990, NES, USA ROM, MMC1, 60 Hz)
-Class and route:       Binary 6502 code -> "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on
-                       the host (tools/recomp.py) to C (host test) and to 68020 assembly (Amiga), entry points found by
-                       tracing the ROM in a reference NES (tools/nesref). PPU, mapper and controller replaced by plain-C
-                       state (src/nes.c) and an AGA display (src/video.c). The user asked for this ROM to be ported.
-Display:               planes=4 scroll=1 fetch=0 buffers=1 sprites used=7 (3 attached 64-pixel pairs + sprite 6,
-                       reused down the screen) colours=32 (16 background + 16 sprite = the NES's 25 on screen)
-Busiest moment:        fielding: camera scrolling in x and y, ~40 NES sprites, NES CPU 95-100% busy.
-                       Not a Step 2 sum: the logic alone is ~85% of a frame per NES frame there (measured, debug build,
-                       p90 60,695 colour clocks a tick), and 6 NES frames fall in 5 Amiga frames.
-Cut from the original: sprite-behind-background priority (sprites always in front); the 32-pixel side borders
-                       show the backdrop colour; very high NES notes are clamped to Paula's fastest rate; sprite
-                       clusters that find no free hardware sprite would be dropped (none dropped in the 3000-tick host run).
-                       Sound is in: the NES APU (2 pulse, triangle, noise; the game uses no DMC) modelled on Paula.
-Stock A1200 bench:     frames=1892 late=647 worst_cck=1097057 avg_cck=46728 budget_cck=71051 worst_pct=1544 avg_pct=65 display_hz=50 shown_fps=37.2
-                       ticks=3000 checksum=b5a58399  (FS-UAE 3.1.66, tools/bench.sh, AROS ROM)
-With 4 MB fast RAM:    frames=2234 late=267 worst_cck=499838 avg_cck=28236 budget_cck=71051 worst_pct=703 avg_pct=39 display_hz=50 shown_fps=44.6
-                       ticks=3000 checksum=b5a58399
-With 8 MB fast RAM:    frames=2234 late=267 worst_cck=499838 avg_cck=28236 budget_cck=71051 worst_pct=703 avg_pct=39 display_hz=50 shown_fps=44.6
-                       ticks=3000 checksum=b5a58399  (tools/bench.sh dist llb 3000 - --fast_memory=8192)
-Host checksum:         b5a58399 after 3000 ticks  equal
-Frame rate claim:      37.2 fps shown on the stock A1200, 44.6 fps with 4 or 8 MB fast RAM (the same), logic at 60
-                       ticks a second (game time follows the clock). 50 Hz NOT held on any of them: tools/port.sh
-                       prints FAIL. Menus and batting run at 50 Hz on fast RAM; the late frames are field play (the NES
-                       game itself uses 95-100% of its CPU there) and a few screen changes.
-                       Field play on 4 MB, per frame: game logic ~35k colour clocks (29k a tick x 1.2), display ~25-35k,
-                       against a 71k frame. Hand-written replacements so far: controller read, the MMC1 routines, the
-                       16x8 multiply, the metasprite builder, nametable writes to the PPU, OAM DMA. What is left is
-                       spread over hundreds of game routines and the sprite/tile code of the display.
-                       Cheapest upgrade likely to reach 50 Hz: a 68030 accelerator with fast RAM (not measured).
-Not done, not tested:  real A1200 hardware, a Commodore Kickstart ROM (the user supplied one; it was not used: the kit's
-                       bench boots the AROS ROM), NTSC machines, the sound by ear (checked as a WAV from tools/shost.c, not
-                       listened to on the emulator), interactive play beyond the scripted bench
-                       (controls are wired but untested by a person), CI (the ROM cannot be committed to this public
-                       repository, so CI has nothing to build).
-How to run:            put the ROM at original/llb.nes, run tools/make_assets.sh, then tools/port.sh (or tools/build.sh
-                       with the SOURCES line of port.conf). Copy dist/llb to the Amiga and run "llb" from a Shell
-                       ("llb bench 3000" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B.
-                       Keys: cursor keys = pad, X = A, Z or Alt = B, Space = Select, Return/Enter = Start, Esc = quit.
+Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World release, 2 MB cartridge, 60 Hz).
+                       This is the state after bringing the Neo Geo Pocket Color tools up on it, not a finished port.
+Class and route:       Binary TLCS-900/H code. The Step 1 table has no row for this CPU; the route is the one of its row
+                       "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on the host
+                       (tools/recomp900.py) to C, entry points found by tracing the game on a reference machine
+                       (tools/ngpref). K2GE, BIOS calls, interrupts and the Z80 sound processor are plain-C state
+                       (src/ngpc/ngp.c). The user supplied the cartridge and BIOS images and asked for the tools.
+Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colours=256 (the K2GE's 256 palette entries
+                       are the pens). First display only: every pixel computed from the K2GE's memory, converted with
+                       the kit's C2P routine, 160 x 152 shown as 320 x 152. No planar display yet.
+Busiest moment:        ball flight and hole views: both scroll planes, sprites, music. Not a Step 2 sum: measured on the
+                       reference machine the main CPU runs 1,700-3,900 instructions a frame there (5,200 at the 90th
+                       percentile, 13,100 at scene changes) and the sound program 1,500-4,200 (up to 6,200).
+Cut from the original: sound (the sound program runs, nothing plays it); saved games (flash writes are accepted and
+                       forgotten); the serial link; the date (fixed). Raster effects: not modelled, and not seen used
+                       by this game in the bench (it takes the vertical blank interrupt only).
+Stock A1200 bench:     no bench.txt. The program ends before the takeover with "cannot load rom.bin: file missing, or
+                       not enough memory for the cartridge": the cartridge holds 1,544 KB of data.
+                       (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
+With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks): FAIL, "NO bench.txt (crashed, hung, or did not finish in 204 s)":
+                       the port is too slow to play 3,600 ticks in the referee's time.
+                       tools/long_bench.sh dist ntm 300 400 - --fast_memory=4096:
+                       frames=33 late=1655 worst_cck=5445625 avg_cck=3666854 budget_cck=71051 worst_pct=7664 avg_pct=5160 display_hz=50 shown_fps=0.9
+                       ticks=300 checksum=fa876f99 logic_avg_cck=205074 logic_worst_cck=2164676
+                       tools/long_bench.sh dist ntm 900 1500 - --fast_memory=4096:
+                       frames=95 late=12387 worst_cck=17493585 avg_cck=9413191 budget_cck=71051 worst_pct=24621 avg_pct=13248 display_hz=50 shown_fps=0.3
+                       ticks=900 checksum=544160df logic_avg_cck=764273 logic_worst_cck=3010195
+Host checksum:         fa876f99 after 300 ticks, 544160df after 900 ticks: equal to the Amiga's both times.
+                       dfdb0755 after 3,600 ticks on the host; the Amiga was not run that far (not measured).
+                       On the host the translation equals the interpreter after every one of 3,600 ticks
+                       (tools/verify_ngpc.sh 3600: work RAM, shared RAM and K2GE memory compared each tick).
+Frame rate claim:      0.9 pictures a second over the first 300 ticks and 0.3 over the first 900, with 4 MB fast RAM.
+                       Game time is NOT kept: the logic alone takes 205,074 colour clocks a tick (300 ticks) and
+                       764,273 (900 ticks) against a frame of 71,051. 50 Hz is not held and the stock machine does
+                       not start. Where the time goes, solved from those two benches: about 249 colour clocks for
+                       every instruction of the sound program (it runs through a Z80 interpreter, which the brief
+                       forbids; it is there so that the logic is complete and provable) and about 53 for every
+                       translated instruction of the main CPU (C with the registers in memory). The sound program
+                       is 86% of the logic time over the 900 ticks. The first display takes 25 to 30 frames a picture.
+                       Cheapest upgrade likely to reach 50 Hz: not measured, and not known before the sound program
+                       is translated and the main CPU has a 68k back end.
+Not done, not tested:  a display that can hold 50 Hz; sound; a 68k back end; translation of the sound program; real
+                       A1200 hardware; a Commodore Kickstart ROM; NTSC; a real Neo Geo Pocket (the reference machine was
+                       compared with Mednafen 1.29: two pictures of the intro, 0 of 24,320 pixels differ; with nothing
+                       else); play by a person (controls are wired, untested); scenes beyond the bench (title, menus,
+                       course intro, first hole): their code is not traced, so the port stops there with reason 2;
+                       CI (the images cannot be committed to this public repository).
+How to run:            put the cartridge image at original/ntm.ngc and, if you have it, the BIOS image at
+                       original/bios.ngp; PORT_CONF=port.ngpc.conf tools/make_assets_ngpc.sh; then
+                       PORT_CONF=port.ngpc.conf tools/port.sh fast (or tools/long_bench.sh dist ntm 300 400 -
+                       --fast_memory=4096 for a run that finishes). Copy dist/ntm, dist/rom.bin and dist/font.bin to
+                       an Amiga with fast RAM and run "ntm" from a Shell ("ntm bench 300" for the proof run).
+                       Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor keys = pad, X = A,
+                       Z = B, Space or Return = Option, Esc = quit.

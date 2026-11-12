@@ -211,7 +211,7 @@ sections above if a lesson is general.
 
 ### 1. Neo Turf Masters (SNK 1999), 2 MB colour cartridge, 2026-11: bringing the tools up
 
-- This entry is the first game the tools ran, not a finished port: `REPORT-NGPC.txt` has the state.
+- This entry is the first game the tools ran, not a finished port: `REPORT.txt` has the state.
 - New: every tool in section 1.
 - The game would not get past its logo without a Z80: it polls shared RAM for the sound program's answer
   with a 32-bit countdown. The sound processor is part of the logic, not an extra.

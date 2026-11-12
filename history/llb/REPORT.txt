@@ -1,0 +1,40 @@
+PORT REPORT
+Game:                  Little League Baseball: Championship Series (SNK 1990, NES, USA ROM, MMC1, 60 Hz)
+Class and route:       Binary 6502 code -> "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on
+                       the host (tools/recomp.py) to C (host test) and to 68020 assembly (Amiga), entry points found by
+                       tracing the ROM in a reference NES (tools/nesref). PPU, mapper and controller replaced by plain-C
+                       state (src/nes.c) and an AGA display (src/video.c). The user asked for this ROM to be ported.
+Display:               planes=4 scroll=1 fetch=0 buffers=1 sprites used=7 (3 attached 64-pixel pairs + sprite 6,
+                       reused down the screen) colours=32 (16 background + 16 sprite = the NES's 25 on screen)
+Busiest moment:        fielding: camera scrolling in x and y, ~40 NES sprites, NES CPU 95-100% busy.
+                       Not a Step 2 sum: the logic alone is ~85% of a frame per NES frame there (measured, debug build,
+                       p90 60,695 colour clocks a tick), and 6 NES frames fall in 5 Amiga frames.
+Cut from the original: sprite-behind-background priority (sprites always in front); the 32-pixel side borders
+                       show the backdrop colour; very high NES notes are clamped to Paula's fastest rate; sprite
+                       clusters that find no free hardware sprite would be dropped (none dropped in the 3000-tick host run).
+                       Sound is in: the NES APU (2 pulse, triangle, noise; the game uses no DMC) modelled on Paula.
+Stock A1200 bench:     frames=1892 late=647 worst_cck=1097057 avg_cck=46728 budget_cck=71051 worst_pct=1544 avg_pct=65 display_hz=50 shown_fps=37.2
+                       ticks=3000 checksum=b5a58399  (FS-UAE 3.1.66, tools/bench.sh, AROS ROM)
+With 4 MB fast RAM:    frames=2234 late=267 worst_cck=499838 avg_cck=28236 budget_cck=71051 worst_pct=703 avg_pct=39 display_hz=50 shown_fps=44.6
+                       ticks=3000 checksum=b5a58399
+With 8 MB fast RAM:    frames=2234 late=267 worst_cck=499838 avg_cck=28236 budget_cck=71051 worst_pct=703 avg_pct=39 display_hz=50 shown_fps=44.6
+                       ticks=3000 checksum=b5a58399  (tools/bench.sh dist llb 3000 - --fast_memory=8192)
+Host checksum:         b5a58399 after 3000 ticks  equal
+Frame rate claim:      37.2 fps shown on the stock A1200, 44.6 fps with 4 or 8 MB fast RAM (the same), logic at 60
+                       ticks a second (game time follows the clock). 50 Hz NOT held on any of them: tools/port.sh
+                       prints FAIL. Menus and batting run at 50 Hz on fast RAM; the late frames are field play (the NES
+                       game itself uses 95-100% of its CPU there) and a few screen changes.
+                       Field play on 4 MB, per frame: game logic ~35k colour clocks (29k a tick x 1.2), display ~25-35k,
+                       against a 71k frame. Hand-written replacements so far: controller read, the MMC1 routines, the
+                       16x8 multiply, the metasprite builder, nametable writes to the PPU, OAM DMA. What is left is
+                       spread over hundreds of game routines and the sprite/tile code of the display.
+                       Cheapest upgrade likely to reach 50 Hz: a 68030 accelerator with fast RAM (not measured).
+Not done, not tested:  real A1200 hardware, a Commodore Kickstart ROM (the user supplied one; it was not used: the kit's
+                       bench boots the AROS ROM), NTSC machines, the sound by ear (checked as a WAV from tools/shost.c, not
+                       listened to on the emulator), interactive play beyond the scripted bench
+                       (controls are wired but untested by a person), CI (the ROM cannot be committed to this public
+                       repository, so CI has nothing to build).
+How to run:            put the ROM at original/llb.nes, run tools/make_assets.sh, then tools/port.sh (or tools/build.sh
+                       with the SOURCES line of port.conf). Copy dist/llb to the Amiga and run "llb" from a Shell
+                       ("llb bench 3000" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B.
+                       Keys: cursor keys = pad, X = A, Z or Alt = B, Space = Select, Return/Enter = Start, Esc = quit.

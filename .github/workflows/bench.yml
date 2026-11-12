@@ -1,26 +1,45 @@
-# Builds the port described in port.conf, runs its bench on an emulated stock Amiga 1200,
-# and fails unless the brief's gates pass. The same script runs locally: tools/port.sh
+# Checks the tools on every push, and builds and benches the port when the game's image is present.
+# The image is copyrighted and this repository is public, so on GitHub only the first job runs: the bench
+# runs where the image is (tools/port.sh fast locally). The same script is the referee: tools/port.sh
 name: bench
 on: [push, pull_request, workflow_dispatch]
 jobs:
-  bench:
+  tools:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install the emulator and the compiler
-        timeout-minutes: 20       # setup.sh limits its own downloads; this is the backstop
-        run: tools/setup.sh
       - name: The kit is unchanged
         run: tools/check_kit.sh
+      - name: Decoder and assembler agree (TLCS-900/H)
+        run: python3 tools/ngpref/test_asm.py
+      - name: The reference machine and the port's machine compile without warnings
+        run: |
+          cc -O2 -Wall -Wextra -Werror -o /tmp/ngpref tools/ngpref/ngpref.c src/ngpc/k2ge.c
+          cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/ngp.c -o /tmp/ngp.o
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is the game's image here?
+        id: rom
+        run: |
+          . ./port.conf
+          if ls original/$GAME.* >/dev/null 2>&1; then echo "have=1" >> "$GITHUB_OUTPUT"; else echo "no original/$GAME image: bench skipped (it is never committed)"; fi
+      - name: Install the emulator and the compiler
+        if: steps.rom.outputs.have == '1'
+        timeout-minutes: 20
+        run: tools/setup.sh
       - name: Build, bench and check the gates
-        run: tools/port.sh
+        if: steps.rom.outputs.have == '1'
+        run: tools/make_assets_ngpc.sh && tools/port.sh fast
       - name: Keep the evidence
-        if: always()
+        if: always() && steps.rom.outputs.have == '1'
         uses: actions/upload-artifact@v4
         with:
           name: bench
           path: |
-            bench.txt
-            shot.png
+            bench_fast.txt
+            shot_fast.png
           if-no-files-found: ignore
