@@ -48,16 +48,20 @@ Step 2 row: **"Scrolling, up to 64 colours, with sprites"**: 6 planes, scroll 1,
   of its rows 0-151, so every vertical scroll position is one `disp_scroll` and costs no drawing. Cells in rows 0-151
   are drawn twice.
 - **Horizontal scroll** follows the kit's scrolling map: the scroll register's steps are added up into a running `x`
-  (the picture slides through memory, `level_w` 4096). Course columns are drawn as they come into the 160-pixel window,
-  and black columns where the window leaves, so the side borders stay black. At the end of `level_w`, `x` is set back
+  (the picture slides through memory, `level_w` 4096). Course columns are drawn as they come into the 160-pixel window.
+  Columns outside it are cleared to black with the kit's `disp_clear` (into all three buffers), neighbours in one
+  rectangle, so the side borders stay black: black tiles cost too much when the game jumps its scroll a whole screen.
+  A course tile can reach up to 15 pixels past the window; the front layer's sprites are black there. At the end of `level_w`, `x` is set back
   and the visible 10 x 10 tiles redrawn over several frames (every 3,776 pixels of scrolling one way).
 - **Course cells.** A Pocket cell is 8 x 8 with its own palette and flips; `disp_tile` draws 16 x 16 at x multiples of
   16. A changed cell makes its 16 x 16 tile be composed by the CPU from its four cells into a chip RAM scratch tile
   (a table per palette slot, 4 pixels a lookup), then drawn with `disp_tile`. At most **4 tiles a frame**; a scene
   change (up to 2,048 cells) is drawn over several frames, as the kit's scrolling map does with columns.
 - **Front layer = the Pocket's plane 1 plus the sprite objects that must be in front of it, in hardware sprites 0-4.**
-  Five 64-pixel sprites, 152 lines tall, cover the whole picture: attached pair 0+1 at x 96-159 (15 colours: the
-  mini-map), attached pair 2+3 at x 32-95 (15 colours), sprite 4 at x 0-31 (3 colours: the text column). This is the
+  Five 64-pixel sprites, 152 lines tall, cover the picture and 16 pixels on each side, in three strips: attached pair
+  2+3 at window x -16..47 (15 colours), attached pair 0+1 at 48..111 (15 colours), sprite 4 at 112..175 (3 colours,
+  one of them the border's black). The right strip for sprite 4 was measured best: on the left it turned trees, the
+  power meter and the yellow text black; on the right it costs the mini-map's blue water. This is the
   brief's status-bar rule ("one 64-pixel sprite per 64 pixels of bar ... change digits by writing into the sprite
   data, only when the value changes"). A changed plane 1 cell is written into the sprite data by the CPU; where the
   front plane is see-through the sprites are colour 0 and the course shows. Each sprite has two data blocks, swapped
@@ -67,9 +71,11 @@ Step 2 row: **"Scrolling, up to 64 colours, with sprites"**: 6 planes, scroll 1,
   and objects larger than 32 x 32 (the golfer at the swing, title pictures) are written into the front layer.
 - **Colours.** Playfield: course up to 28 + bob objects up to 18 + background = 47 of 64, pens given out per palette
   slot (3 pens) for each scene; a palette change (the game's fades) is a `disp_palette` call. Front layer: one bank
-  of 16 (`sprite_bank` 4, colours 64-79): 15 for the pairs, entries 9-11 also used by sprite 4.
-- **The window register** (narrowed in 12% of pictures): the area outside is filled in the front layer with the
-  outside colour when it changes.
+  of 16 (`sprite_bank` 4, colours 64-79): 15 for the pairs, entries 9-11 also used by sprite 4 (9 is black).
+- **The window register** (narrowed in 12% of pictures, mostly wipes): the area outside is filled in the front layer
+  with the outside colour; when it moves only the cells whose inside or outside changed are drawn again. An empty
+  window (a blank screen) is only a colour change: every playfield and sprite colour but the border's black becomes the
+  outside colour, and nothing is drawn.
 - **Sound** stays as it is (the recorded sound program on Paula, ptplayer's effect channels).
 
 ## 4. Objects and sizes
@@ -116,8 +122,9 @@ tile and the sound: about 520 KB.
 
 1. Fewer planes: 6, not 8 (the per-pixel display used 8).
 2. Front-layer colours: the Pocket's front plane and front sprites use up to 48 colours in one picture; the front
-   layer has 15 (the pairs) and 3 (the 32-pixel text strip at the left). Colours are mapped to the nearest of those
-   per scene. Visible: the HUD and the swing golfer lose shades.
+   layer has 15 (the pairs) and 3 (sprite 4's strip at the right, x 112-159 of the picture). Colours are mapped to the
+   nearest of those per scene. Visible: the HUD and the swing golfer lose shades; the mini-map's blue water turns
+   green. Measured on the host (tools/hwdisp_test.c): 1.0-4.4% of the pixels differ from the Pocket's picture.
 3. Bursts are spread: a new screen (up to 2,048 cells), a front-plane scroll (3% of pictures: the whole front layer
    is rewritten) and the golfer's bigger frames take more than one frame to appear; frames are not late, the
    changed parts show up to a few frames after the game made them.
