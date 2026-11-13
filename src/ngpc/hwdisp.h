@@ -33,6 +33,8 @@ void *hw_chip(uint32_t bytes);
 
 /* per-frame limits on drawing (FEASIBILITY.md section 5); the rest waits for the next frames */
 extern int hwdisp_tiles_per_frame, hwdisp_cells_per_frame;
+extern uint32_t hwdisp_budget;                  /* and a time limit: colour clocks (0: none); hw_now() is the clock */
+uint32_t hw_now(void);
 extern int hwdisp_s4_strip;                     /* which 64-pixel strip (0 left, 1 middle, 2 right) has only 3 colours */
 
 int  hwdisp_init(void);                                             /* 0: no memory */
@@ -43,6 +45,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty);
 /* what the last hwdisp_frame() did, and totals (for the host test and the bench) */
 typedef struct {
     int tiles, tiles_left, clears, cells, cells_left, bobs, front_objs, slot_misses, remaps, rebases, why_scroll, why_chr, why_objs;
+    uint32_t t_start, t_tiles, t_front, t_objs, composed;     /* hw_now() time of each phase */
 } HwStats;
 extern HwStats hwdisp_last;
 #endif

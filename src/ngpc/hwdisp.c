@@ -37,12 +37,16 @@
 
 int hwdisp_tiles_per_frame = 4, hwdisp_cells_per_frame = 20, hwdisp_s4_strip = 2;
 HwStats hwdisp_last;
+uint32_t hwdisp_budget;                         /* colour clocks this frame's drawing may take (0: no limit) */
+static uint32_t frame_t0;
+static int out_of_time(void) { return hwdisp_budget && hw_now() - frame_t0 >= hwdisp_budget; }
 
 static const uint8_t *V;
 static int back_sel = -1;                       /* the back plane's map: 0 = 0x9000, 1 = 0x9800 */
 static int32_t U, cam_x, cam_y;
 static uint8_t last_scx, scroll_known;
 static uint8_t tstate[NCOL][NROW];              /* 0 unknown, 1 black, 2 course */
+static uint8_t col_ok[NCOL];                     /* 1 or 2: every row of the column is in that state (0: not known) */
 static uint16_t bmap[1024];                     /* the back plane's map as the tiles were made from it */
 static int pal_refs[16];                        /* back map cells per palette */
 static int8_t key_slot[32], slot_key[NSLOT];    /* key: 0-15 back plane palette, 16-31 sprite palette */
@@ -54,12 +58,14 @@ static int pf_rgb_ok, bank_rgb_ok;
 
 /* front layer */
 static uint8_t keybuf[HW_VIEW_H][FW];
-static uint8_t fdirty[FCH][FCW], fpend[2][FCH][FCW];
+static uint32_t fdm[FCH], fpm[2][FCH];          /* per row of cells, bit cx: to compose; to convert into sprite copy 0 / 1 */
+#define FULLROW ((1u << FCW) - 1)
+static void fdirty_all(void) { int y; for (y = 0; y < FCH; y++) fdm[y] = FULLROW; }
 static uint32_t cellkeys[FCH][FCW][4];          /* the keys each cell holds */
 static int key_count[NKEY], key_count_s4[NKEY];
 static uint8_t map_pair[NKEY], map_s4[NKEY], map_s4b[NKEY], entry_key[16];   /* map_s4b: sprite 4's 2 bits */
 static uint32_t spread[16];                      /* an entry's 4 bits, one in each byte */
-static int fdirty_any = 1, fpend_any = 1, tiles_clean;
+static int fdirty_any = 1, fpend_any = 1, tiles_clean, front_changed = 1;   /* front_changed: the front plane changed this frame */
 static uint8_t key_present[NKEY];
 static uint16_t *sprblk[2][5];
 static int frame_no;
@@ -205,15 +211,17 @@ static void alias_mark(int c, int r, int black)
     for (d = -32; d <= 32; d += 64) {
         int cc = c + d;
         if (cc < 0 || cc >= NCOL) continue;
-        for (k = r - 1; k <= r + 1; k++) if (k >= 0 && k < NROW && !(black && tstate[cc][k] == 1)) tstate[cc][k] = 0;
+        for (k = r - 1; k <= r + 1; k++) if (k >= 0 && k < NROW && !(black && tstate[cc][k] == 1)) { tstate[cc][k] = 0; col_ok[cc] = 0; }
     }
 }
 static void inval_back_cell(int mx, int my)     /* a cell of the back map changed: the tiles that show it */
 {
-    int c, c0 = (cam_x - 64) / 16, c1 = (cam_x + 384) / 16, r = my >> 1;
-    for (c = c0 < 0 ? 0 : c0; c <= c1 && c < NCOL; c++)
-        if ((((unsigned)(c * 16 - W0) & 255) >> 4) == (unsigned)(mx >> 1) && tstate[c][r] == 2) {
-            tstate[c][r] = 0; tiles_clean = 0;
+    int c0 = (cam_x - 64) / 16, c1 = (cam_x + 384) / 16, r = my >> 1, c;
+    if (c0 < 0) c0 = 0;
+    c = c0 + (int)(((unsigned)(W0 / 16 + (mx >> 1)) - (unsigned)c0) & 15);    /* the columns that show plane column mx/2 */
+    for (; c <= c1 && c < NCOL; c += 16)
+        if (tstate[c][r] == 2) {
+            tstate[c][r] = 0; tiles_clean = 0; col_ok[c] = 0;
             if (r < 10 && tstate[c][r + 16] == 2) tstate[c][r + 16] = 0;
         }
 }
@@ -233,53 +241,88 @@ HWFN void hw_tiles_work(void)
     if (c1 >= NCOL) c1 = NCOL - 1;
     /* black columns: whole columns cleared with the blitter (hw_clear), neighbours in one rectangle */
     for (c = c0; c <= c1 + 1; c++) {
-        int need = c <= c1 && !col_course(c);
-        if (need) { for (r = 0; r < NROW; r++) if (tstate[c][r] != 1) break; need = r < NROW; }
+        int need = c <= c1 && !col_course(c) && col_ok[c] != 1;
+        if (need) { for (r = 0; r < NROW; r++) if (tstate[c][r] != 1) break; need = r < NROW; if (!need) col_ok[c] = 1; }
         if (need && run < 0) run = c;
         if (!need && run >= 0) {
             int k;
             hw_clear(run * 16, 0, (c - run) * 16, HW_BUF_H);
-            for (k = run; k < c; k++) for (r = 0; r < NROW; r++) { tstate[k][r] = 1; alias_mark(k, r, 1); }
+            for (k = run; k < c; k++) { for (r = 0; r < NROW; r++) { tstate[k][r] = 1; alias_mark(k, r, 1); } col_ok[k] = 1; }
             hwdisp_last.clears += c - run; run = -1;
         }
     }
-    for (pass = 0; pass < 3; pass++)             /* what is seen now first, then rows and columns about to be seen */
-        for (c = c0; c <= c1; c++) {
-            int seen_col = c * 16 + 16 > cam_x && c * 16 < cam_x + 320, course = col_course(c);
-            if (pass < 2 && !seen_col) continue;
-            for (r = 0; r < NROW; r++) {
-                int seen = seen_col && r >= vr0 && r <= vr1, want = course ? 2 : 1;
-                if ((pass == 0 && !seen) || (pass == 1 && seen) || (pass == 2 && seen_col)) continue;
-                if (tstate[c][r] == want) continue;
-                if (!n) { left++; continue; }
-                if (!course) continue;
-                hw_compose_tile(c, r, tilebuf); hw_tile(c * 16, r * 16, tilebuf);
-                tstate[c][r] = (uint8_t)want; alias_mark(c, r, !course);
-                n--; hwdisp_last.tiles++;
-            }
+    {
+        uint32_t bad[64], seen_rows = 0;          /* per column of c0..c1: the rows not yet as they must be */
+        int nc = c1 - c0 + 1;
+        if (nc > 64) nc = 64;
+        for (r = vr0; r <= vr1 && r < NROW; r++) seen_rows |= 1u << r;
+        for (c = 0; c < nc; c++) {
+            int cc = c0 + c, want = col_course(cc) ? 2 : 1;
+            bad[c] = 0;
+            if (col_ok[cc] == want || want == 1) continue;           /* black columns were cleared above */
+            for (r = 0; r < NROW; r++) if (tstate[cc][r] != want) bad[c] |= 1u << r;
         }
+        for (pass = 0; pass < 3; pass++)         /* what is seen now first, then rows and columns about to be seen */
+            for (c = 0; c < nc; c++) {
+                int cc = c0 + c, seen_col = cc * 16 + 16 > cam_x && cc * 16 < cam_x + 320;
+                uint32_t m = bad[c] & (pass == 0 ? (seen_col ? seen_rows : 0) : pass == 1 ? (seen_col ? ~seen_rows : 0) : (seen_col ? 0 : ~0u));
+                for (r = 0; m; r++, m >>= 1) {
+                    if (!(m & 1)) continue;
+                    if (!n || out_of_time()) { left++; n = 0; continue; }
+                    hw_compose_tile(cc, r, tilebuf); hw_tile(cc * 16, r * 16, tilebuf);
+                    tstate[cc][r] = 2; alias_mark(cc, r, 0); bad[c] &= ~(1u << r); col_ok[cc] = 0;
+                    n--; hwdisp_last.tiles++;
+                }
+            }
+        for (c = 0; c < nc; c++) if (!bad[c] && col_course(c0 + c)) col_ok[c0 + c] = 2;   /* skipped from now on */
+    }
     hwdisp_last.tiles_left = left;
     tiles_clean = !left; done_x = cam_x;
 }
 
 /* ---- the back map, characters and scroll ---- */
+/* which map cells use each character: a list per character, for each map (0 back, 1 front) */
+static int16_t ch_head[2][512], ch_next[2][1024], ch_prev[2][1024];
+static uint16_t fmap[1024];                     /* the front map as the front layer was made from it */
+static void ch_unlink(int m, int i, int ch)
+{
+    if (ch_prev[m][i] >= 0) ch_next[m][ch_prev[m][i]] = ch_next[m][i]; else ch_head[m][ch] = ch_next[m][i];
+    if (ch_next[m][i] >= 0) ch_prev[m][ch_next[m][i]] = ch_prev[m][i];
+}
+static void ch_link(int m, int i, int ch)
+{
+    ch_prev[m][i] = -1; ch_next[m][i] = ch_head[m][ch];
+    if (ch_head[m][ch] >= 0) ch_prev[m][ch_head[m][ch]] = (int16_t)i;
+    ch_head[m][ch] = (int16_t)i;
+}
+static void ch_build(int m, const uint16_t *map)
+{
+    int i;
+    memset(ch_head[m], -1, sizeof ch_head[m]);
+    for (i = 1023; i >= 0; i--) ch_link(m, i, map[i] & 0x1ff);
+}
 static void back_cell_changed(int i)
 {
     unsigned e = RD16(V + (back_sel ? 0x1800 : 0x1000) + i * 2);
     if (e == bmap[i]) return;
     pal_refs[(bmap[i] >> 9) & 15]--; pal_refs[(e >> 9) & 15]++;
+    if ((e & 0x1ff) != (bmap[i] & 0x1ffu)) { ch_unlink(0, i, bmap[i] & 0x1ff); ch_link(0, i, e & 0x1ff); }
     bmap[i] = (uint16_t)e;
     inval_back_cell(i & 31, i >> 5);
 }
 static void reset_all(void)
 {
+    front_changed = 1;
     tiles_clean = 0;
     int i, c, r;
     const uint8_t *map = V + (back_sel ? 0x1800 : 0x1000);
     memset(pal_refs, 0, sizeof pal_refs);
     for (i = 0; i < 1024; i++) { bmap[i] = (uint16_t)RD16(map + i * 2); pal_refs[(bmap[i] >> 9) & 15]++; }
+    for (i = 0; i < 1024; i++) fmap[i] = (uint16_t)RD16(V + (back_sel ? 0x1000 : 0x1800) + i * 2);
+    ch_build(0, bmap); ch_build(1, fmap);
     for (c = 0; c < NCOL; c++) for (r = 0; r < NROW; r++) if (tstate[c][r] != 1) tstate[c][r] = 0;
-    memset(fdirty, 1, sizeof fdirty); fdirty_any = 1;
+    memset(col_ok, 0, sizeof col_ok);
+    fdirty_all(); fdirty_any = 1;
     clear_cache();
 }
 
@@ -292,11 +335,13 @@ static void front_cell_mark(int x0, int y0, int x1, int y1)     /* window pixels
     if (y0 < 0) y0 = 0;
     if (x1 >= FW) x1 = FW - 1;
     if (y1 >= HW_VIEW_H) y1 = HW_VIEW_H - 1;
-    for (cy = y0 >> 3; cy <= y1 >> 3; cy++) for (cx = x0 >> 3; cx <= x1 >> 3; cx++) fdirty[cy][cx] = 1;
+    for (cy = y0 >> 3; cy <= y1 >> 3; cy++) fdm[cy] |= ((2u << (x1 >> 3)) - 1) & ~((1u << (x0 >> 3)) - 1);
+    (void)cx;
     fdirty_any = 1;
 }
 static void front_map_cell_changed(int mx, int my)
 {
+    front_changed = 1;
     int sx = (mx * 8 - front_scx) & 255, sy = (my * 8 - front_scy) & 255;
     if (sx > 248) sx -= 256;
     if (sy > 248) sy -= 256;
@@ -348,7 +393,7 @@ HWFN int hw_cell_fast(int cx, int cy)           /* no sprite, plane on the 8 x 8
     km[0] = km[1] = km[2] = km[3] = 0;
     if (pres & 1) km[0] |= 1;
     for (k = 1; k < 4; k++) if (pres >> k & 1) { int key = (int)p * 3 + k; km[key >> 5] |= 1u << (key & 31); }
-    if (changed) { fpend[0][cy][cx] = fpend[1][cy][cx] = 1; fpend_any = 1; }
+    if (changed) { fpm[0][cy] |= 1u << cx; fpm[1][cy] |= 1u << cx; fpend_any = 1; }
     return 1;
 }
 /* the keys of one 8-pixel row of a character at x offset dx (-7..7) of out[8..15]: colour c -> base + c */
@@ -415,7 +460,7 @@ HWFN void hw_compose_cell(int cx, int cy)
         }
         for (i = 0; i < 8; i++) km[keys[i] >> 5] |= 1u << (keys[i] & 31);
     }
-    if (changed) { fpend[0][cy][cx] = fpend[1][cy][cx] = 1; fpend_any = 1; }
+    if (changed) { fpm[0][cy] |= 1u << cx; fpm[1][cy] |= 1u << cx; fpend_any = 1; }
 }
 /* bank entries for the keys: 9-11 the three most used keys in sprite 4's strip (9 black when that strip is at an edge);
    1-8 and 12-15 the most used of the rest, black among them; the others the nearest colour. 1 when the mapping changed. */
@@ -504,22 +549,33 @@ HWFN void hw_front_work(int blank)
     int cx, cy, n = hwdisp_cells_per_frame, b = frame_no & 1, left = 0, i;
     if (fdirty_any) {
         fdirty_any = 0;
-        for (cy = 0; cy < FCH; cy++) for (cx = 0; cx < FCW; cx++)
-            if (fdirty[cy][cx]) { if (n) { hw_compose_cell(cx, cy); fdirty[cy][cx] = 0; n--; } else { left++; fdirty_any = 1; } }
+        for (cy = 0; cy < FCH; cy++) {
+            uint32_t m = fdm[cy];
+            for (cx = 0; m; cx++, m >>= 1) {
+                if (!(m & 1)) continue;
+                if (n && !out_of_time()) { hw_compose_cell(cx, cy); fdm[cy] &= ~(1u << cx); n--; hwdisp_last.composed++; }
+                else { n = 0; left++; fdirty_any = 1; }
+            }
+        }
     }
     if (hw_remap_needed() && hw_remap()) {             /* only the cells that hold a key whose entry changed */
         for (cy = 0; cy < FCH; cy++) for (cx = 0; cx < FCW; cx++) {
             uint32_t *km = cellkeys[cy][cx];
-            if ((km[0] & remap_keys[0]) | (km[1] & remap_keys[1]) | (km[2] & remap_keys[2]) | (km[3] & remap_keys[3])) { fpend[0][cy][cx] = fpend[1][cy][cx] = 1; fpend_any = 1; }
+            if ((km[0] & remap_keys[0]) | (km[1] & remap_keys[1]) | (km[2] & remap_keys[2]) | (km[3] & remap_keys[3])) { fpm[0][cy] |= 1u << cx; fpm[1][cy] |= 1u << cx; fpend_any = 1; }
         }
         hwdisp_last.remaps++;
     }
     n = hwdisp_cells_per_frame * 2;              /* conversions are cheaper than composing (FEASIBILITY.md: 20 cells) */
     if (fpend_any) {
         int more = 0;
-        for (cy = 0; cy < FCH; cy++) for (cx = 0; cx < FCW; cx++) {
-            if (fpend[b][cy][cx]) { if (n) { hw_convert_cell(b, cx, cy); fpend[b][cy][cx] = 0; n--; hwdisp_last.cells++; } else left++; }
-            more |= fpend[b][cy][cx] | fpend[!b][cy][cx];
+        for (cy = 0; cy < FCH; cy++) {
+            uint32_t m = fpm[b][cy];
+            for (cx = 0; m; cx++, m >>= 1) {
+                if (!(m & 1)) continue;
+                if (n && !out_of_time()) { hw_convert_cell(b, cx, cy); fpm[b][cy] &= ~(1u << cx); n--; hwdisp_last.cells++; }
+                else { n = 0; left++; }
+            }
+            more |= fpm[b][cy] | fpm[!b][cy];
         }
         fpend_any = more;
     }
@@ -558,6 +614,10 @@ HWFN int hw_front_plane_under(int x0, int y0, int x1, int y1)    /* any front-pl
 }
 HWFN void hw_find_objects(void)
 {
+    static uint8_t last[0x100 + 0x40 + 2]; static int known;
+    if (known && !front_changed && !memcmp(last, V + 0x800, 0x100) && !memcmp(last + 0x100, V + 0xc00, 0x40) && last[0x140] == V[0x20] && last[0x141] == V[0x21])
+        return;                                  /* the same sprites, the same front plane: the same objects */
+    memcpy(last, V + 0x800, 0x100); memcpy(last + 0x100, V + 0xc00, 0x40); last[0x140] = V[0x20]; last[0x141] = V[0x21]; known = 1;
     int i, j, lastx = 0, lasty = 0, par[64], oid[64], m = 0;
     nspr = 0;
     for (i = 0; i < 64; i++) {
@@ -577,13 +637,24 @@ HWFN void hw_find_objects(void)
         nspr++;
     }
     for (i = 0; i < nspr; i++) par[i] = i;
-    for (i = 0; i < nspr; i++) for (j = 0; j < i; j++) {
-        int dx = spr[i].x - spr[j].x, dy = spr[i].y - spr[j].y;
-        if (dx >= -8 && dx <= 8 && dy >= -8 && dy <= 8) {
-            int a = i, b = j;
-            while (par[a] != a) a = par[a];
-            while (par[b] != b) b = par[b];
-            if (a != b) par[a] = b;
+    {   /* touching sprites (8 pixels apart at most) are in neighbouring 8 x 8 buckets: only those are compared */
+        static int8_t head[21 * 20]; int8_t next[64];
+        memset(head, -1, sizeof head);
+        for (i = 0; i < nspr; i++) {
+            int bx = (spr[i].x + 8) >> 3, by = (spr[i].y + 8) >> 3, ox, oy;
+            for (oy = by - 1; oy <= by + 1; oy++) for (ox = bx - 1; ox <= bx + 1; ox++) {
+                if (ox < 0 || ox >= 21 || oy < 0 || oy >= 20) continue;
+                for (j = head[oy * 21 + ox]; j >= 0; j = next[j]) {
+                    int dx = spr[i].x - spr[j].x, dy = spr[i].y - spr[j].y;
+                    if (dx >= -8 && dx <= 8 && dy >= -8 && dy <= 8) {
+                        int a = i, b = j;
+                        while (par[a] != a) a = par[a];
+                        while (par[b] != b) b = par[b];
+                        if (a != b) par[a] = b;
+                    }
+                }
+            }
+            next[i] = head[by * 21 + bx]; head[by * 21 + bx] = (int8_t)i;
         }
     }
     nobj = 0;
@@ -685,12 +756,13 @@ int hwdisp_init(void)
     }
     fdirty_any = fpend_any = 1; tiles_clean = 0;
     memset(tstate, 1, sizeof tstate);            /* the kit clears the buffers: black */
+    memset(col_ok, 1, sizeof col_ok);
     memset(key_slot, -1, sizeof key_slot); memset(slot_key, -1, sizeof slot_key);
     memset(keybuf, 0, sizeof keybuf);
     memset(key_count, 0, sizeof key_count); memset(key_count_s4, 0, sizeof key_count_s4);
     key_count[0] = HW_VIEW_H * FW; key_count_s4[0] = HW_VIEW_H * 64;
     memset(map_pair, 0, sizeof map_pair); memset(map_s4, 0, sizeof map_s4); memset(entry_key, 0, sizeof entry_key); memset(key_present, 0, sizeof key_present);
-    memset(fdirty, 1, sizeof fdirty); fdirty_any = 1;
+    fdirty_all(); fdirty_any = 1;
     back_sel = -1; scroll_known = 0; U = 0; frame_no = 0;
     return 1;
 }
@@ -701,8 +773,10 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
     int32_t want_cam;
     V = v;
     memset(&hwdisp_last, 0, sizeof hwdisp_last);
+    front_changed = 0;
+    frame_t0 = hw_now();
     if (!scroll_known) { memset(char_empty, 0, sizeof char_empty); for (i = 0; i < 512; i++) dirty->chr[i] = 1; dirty->any = 1; }
-    if (dirty->any) for (i = 0; i < 512; i++) if (dirty->chr[i]) {
+    if (dirty->any) for (i = 0; i < 512; i++) if ((i & 3) || L4(dirty->chr + i) ? dirty->chr[i] : (i += 3, 0)) {
         const uint8_t *c = v + 0x2000 + i * 16; int k, e = 1;
         for (k = 0; k < 16; k++) if (c[k]) e = 0;
         char_empty[i] = (uint8_t)e;
@@ -719,6 +793,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
         if (want_cam < 64 || want_cam > HW_LEVEL_W - 320 - 64) {    /* the end of the slide: start again near W0 */
             U &= 255; want_cam = W0 + U - HW_WIN_X;
             for (i = 0; i < NCOL; i++) memset(tstate[i], 0, NROW);
+            memset(col_ok, 0, sizeof col_ok);
             tiles_clean = 0;
             hwdisp_last.rebases++;
         }
@@ -729,7 +804,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
         int front_base = back_sel ? 0 : 1024, back_base = back_sel ? 1024 : 0, any_chr = 0;
         fsx = v[back_sel ? 0x32 : 0x34]; fsy = v[back_sel ? 0x33 : 0x35];
         if (fsx != front_scx || fsy != front_scy) {
-            front_scx = fsx; front_scy = fsy; memset(fdirty, 1, sizeof fdirty); fdirty_any = 1; hwdisp_last.why_scroll++;
+            front_scx = fsx; front_scy = fsy; fdirty_all(); fdirty_any = 1; hwdisp_last.why_scroll++; front_changed = 1;
         }
         if (memcmp(last_regs, v + 2, 4) && v[4] && v[5]) {     /* the window moved: the cells on its old and new edges */
             int ax0 = last_regs[0], ay0 = last_regs[1], ax1 = ax0 + last_regs[2], ay1 = ay0 + last_regs[3];
@@ -739,37 +814,49 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
                 int x0 = cx * 8 - 16, y0 = cy * 8, x1 = x0 + 8, y1 = y0 + 8;
                 int ina = x0 >= ax0 && x1 <= ax1 && y0 >= ay0 && y1 <= ay1, outa = x1 <= ax0 || x0 >= ax1 || y1 <= ay0 || y0 >= ay1;
                 int inb = x0 >= bx0 && x1 <= bx1 && y0 >= by0 && y1 <= by1, outb = x1 <= bx0 || x0 >= bx1 || y1 <= by0 || y0 >= by1;
-                if (!((ina && inb) || (outa && outb))) { fdirty[cy][cx] = 1; fdirty_any = 1; }
+                if (!((ina && inb) || (outa && outb))) { fdm[cy] |= 1u << cx; fdirty_any = 1; }
             }
             memcpy(last_regs, v + 2, 4);
         }
-        if (dirty->any) for (i = 0; i < 512; i++) if (dirty->chr[i]) { any_chr = 1; break; }
-        if (any_chr) {                          /* changed characters: the cells and objects that show them */
-            const uint8_t *fm = v + (back_sel ? 0x1000 : 0x1800);
+        if (dirty->any) for (i = 0; i < 512; i += 4) if (L4(dirty->chr + i)) { any_chr = 1; break; }
+        if (any_chr) {
+            front_changed = 1;                          /* changed characters: the cells and objects that show them */
+            int ch, k;
             clear_cache();
-            for (i = 0; i < 1024; i++) {
-                if (dirty->chr[bmap[i] & 0x1ff]) inval_back_cell(i & 31, i >> 5);
-                if (dirty->chr[RD16(fm + i * 2) & 0x1ff]) front_map_cell_changed(i & 31, i >> 5);
+            for (ch = 0; ch < 512; ch++) {       /* the cells that use each changed character, from its lists */
+                if (!(ch & 3) && !L4(dirty->chr + ch)) { ch += 3; continue; }
+                if (!dirty->chr[ch]) continue;
+                for (k = ch_head[0][ch]; k >= 0; k = ch_next[0][k]) inval_back_cell(k & 31, k >> 5);
+                for (k = ch_head[1][ch]; k >= 0; k = ch_next[1][k]) front_map_cell_changed(k & 31, k >> 5);
             }
             for (i = 0; i < nfspr_prev; i++) if (dirty->chr[fspr_prev[i].e & 0x1ff]) front_cell_mark(fspr_prev[i].x, fspr_prev[i].y, fspr_prev[i].x + 7, fspr_prev[i].y + 7);
         }
-        if (dirty->any) for (i = 0; i < 1024; i++) {
-            if (dirty->cell[back_base + i]) back_cell_changed(i);
-            if (dirty->cell[front_base + i]) front_map_cell_changed(i & 31, i >> 5);
+        if (dirty->any) for (i = 0; i < 1024; i += 4) {   /* 4 flags at a time: most are 0 */
+            int k;
+            if (L4(dirty->cell + back_base + i)) for (k = i; k < i + 4; k++) if (dirty->cell[back_base + k]) back_cell_changed(k);
+            if (L4(dirty->cell + front_base + i)) for (k = i; k < i + 4; k++) if (dirty->cell[front_base + k]) {
+                unsigned e = RD16(v + (back_sel ? 0x1000 : 0x1800) + k * 2);
+                if (e == fmap[k]) continue;
+                if ((e & 0x1ff) != (fmap[k] & 0x1ffu)) { ch_unlink(1, k, fmap[k] & 0x1ff); ch_link(1, k, e & 0x1ff); }
+                fmap[k] = (uint16_t)e;
+                front_map_cell_changed(k & 31, k >> 5);
+            }
         }
     }
     if (dirty->any) { memset(dirty->cell, 0, sizeof dirty->cell); memset(dirty->chr, 0, sizeof dirty->chr); dirty->any = 0; }
+    hwdisp_last.t_start = hw_now() - frame_t0;
     hw_find_objects();
     hw_front_objects_changed();
     hw_retry_aliases();
-    hw_tiles_work();
+    { uint32_t t = hw_now(); hw_tiles_work(); hwdisp_last.t_tiles = hw_now() - t; }
     blank = !v[4] || !v[5] || v[2] >= 160 || v[3] >= HW_VIEW_H;  /* an empty window: the edge colour everywhere */
-    hw_front_work(blank);
+    { uint32_t t = hw_now(); hw_front_work(blank); hwdisp_last.t_front = hw_now() - t; t = hw_now();
     for (i = 0; i < nobj && !blank; i++) if (!obj[i].front) {
         Bobc *b = hw_bob_image(&obj[i]);
         hw_bob(W0 + U + obj[i].x0, cam_y + obj[i].y0, b->img, b->msk, b->wwords, b->h);
         hwdisp_last.bobs++;
     }
+    hwdisp_last.t_objs = hw_now() - t; }
     for (i = 0; i < nobj; i++) hwdisp_last.front_objs += obj[i].front;
     /* playfield colours: black, the background, the slots */
     {

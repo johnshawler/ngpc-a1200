@@ -41,6 +41,10 @@ extern void co_resume(void);
 static const DispCfg display = { .planes = HW_PLANES, .scroll = 1, .fetch = 1, .view_h = HW_VIEW_H, .buf_h = HW_BUF_H,
                                  .level_w = HW_LEVEL_W, .buffers = 3, .double_y = 0, .sprite_w = 64, .sprite_bank = HW_SPR_BANK };
 static ULONG palette[256];
+#define FRAME_TARGET (71051UL * 70 / 100)        /* logic and drawing of a pass: 70% of a frame */
+#define DRAW_FLOOR 6000UL                        /* the drawing that always happens: objects, sprites, colours */
+static ULONG logic_at_draw;
+static ULONG ph_start, ph_tiles, ph_front, ph_objs, ph_composed;   /* colour clocks per phase of the drawing, summed */
 static ULONG draw_total, draw_worst, hw_tiles, hw_cells, hw_behind;   /* the display's cost and work, for bench.txt */
 
 /* what src/ngpc/hwdisp.c asks of the display: the kit's calls */
@@ -55,6 +59,7 @@ void hw_sprite(int n, uint16_t *blk, int x, int y, int h, int att) { disp_sprite
 void hw_sprite_off(int n) { disp_sprite_off((UWORD)n); }
 void hw_scroll(int32_t x, int32_t y) { disp_scroll(x, y); }
 void hw_palette(const uint32_t *rgb, int first, int count) { disp_palette((const ULONG *)rgb, (UWORD)first, (UWORD)count); }
+uint32_t hw_now(void) { return sys_now(); }
 void *hw_chip(uint32_t bytes) { return sys_alloc(bytes, MEMF_CHIP | MEMF_CLEAR); }   /* before sys_take(): hwdisp_init() */
 static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the logic's own cost */
 
@@ -106,6 +111,7 @@ static void game_start(void)
     prof_install();
 #endif
     sound_start();
+    hwdisp_tiles_per_frame = hwdisp_cells_per_frame = 1000;   /* the time budget limits the drawing (game_draw) */
 }
 
 static void vbl(void) { sys_key_poll(); sound_vbl(); }     /* every vertical blank: keys, then a frame of sound */
@@ -127,12 +133,16 @@ static UWORD read_input(void)
 
 static void game_draw(void)
 {
-    ULONG t0 = sys_now(), t;
+    ULONG t0 = sys_now(), t, logic = logic_total - logic_at_draw;
+    /* what is left of this frame after the ticks of this pass, kept under the brief's 80% (the rest of the drawing waits) */
+    hwdisp_budget = logic + DRAW_FLOOR < FRAME_TARGET ? FRAME_TARGET - logic : DRAW_FLOOR;
+    logic_at_draw = logic_total;
     disp_begin();                               /* erase the objects of two frames ago */
     hwdisp_frame(ngp_vid, &ngp_dirty);          /* tiles, front layer, objects, sprites, scroll, colours */
     t = sys_now() - t0;
     draw_total += t; if (t > draw_worst) draw_worst = t;
     hw_tiles += hwdisp_last.tiles; hw_cells += hwdisp_last.cells;
+    ph_start += hwdisp_last.t_start; ph_tiles += hwdisp_last.t_tiles; ph_front += hwdisp_last.t_front; ph_objs += hwdisp_last.t_objs; ph_composed += hwdisp_last.composed;
     if (hwdisp_last.tiles_left || hwdisp_last.cells_left) hw_behind++;
 }
 
@@ -186,11 +196,15 @@ int main(int argc, char **argv)
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
     if (bench) {
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
-        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu draw_cck=%lu max=%lu tiles=%lu cells=%lu behind=%lu",
+        /* the note holds 127 characters: per frame, colour clocks of logic (worst tick), drawing (worst), and the drawing's
+           phases: st(art), ti(les) with the cost of a tile, fr(ont layer) with the cells composed, ob(jects) */
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu st=%lu ti=%lu/%lu fr=%lu/%lu ob=%lu",
                 (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
                 (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)(frames ? draw_total / frames : 0),
-                (unsigned long)draw_worst, (unsigned long)hw_tiles, (unsigned long)hw_cells, (unsigned long)hw_behind);
+                (unsigned long)draw_worst, (unsigned long)(ph_start / frames), (unsigned long)(ph_tiles / frames), (unsigned long)(hw_tiles ? ph_tiles / hw_tiles : 0),
+                (unsigned long)(ph_front / frames), (unsigned long)ph_composed, (unsigned long)(ph_objs / frames));
         perf_note(text);
+
         perf_save("bench.txt");
 #ifdef SOUND_TRACE
         { extern void sound_trace_save(void); sound_trace_save(); }

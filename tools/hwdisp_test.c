@@ -56,6 +56,7 @@ void hw_sprite(int n, uint16_t *blk, int x, int y, int h, int att) { spr[n].blk 
 void hw_sprite_off(int n) { spr[n].on = 0; }
 void hw_scroll(int32_t x, int32_t y) { sc_x = x; sc_y = y; }
 void hw_palette(const uint32_t *rgb, int first, int count) { memcpy(pal + first, rgb, (size_t)count * 4); }
+uint32_t hw_now(void) { return 0; }   /* the host has no frame clock: the counts limit the work */
 void *hw_chip(uint32_t bytes) { return calloc(1, bytes); }
 
 static int spr_bits(int n, int sx, int sy)     /* 2 bits of sprite n at screen (sx, sy), -1 outside */
