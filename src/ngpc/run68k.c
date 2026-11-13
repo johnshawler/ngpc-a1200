@@ -1,6 +1,7 @@
 /* run68k.c - the Amiga runs the 68k back end of tools/recomp900.py (src/ngpc/gen68k.s, made by tools/back900.py).
  * This is its C side: the registers between the 68k registers and the CPU state, and what the assembly hands to C
- * (the interpreter's step, waits, BIOS calls, memory other than RAM and the cartridge). */
+ * (the op_ functions of gen_ops.c, waits, BIOS calls, memory other than RAM and the cartridge). Nothing here interprets
+ * the game's code: what the traces never reached stops the game (ngp_fatal reason 2). */
 #include <stddef.h>
 #include "ngp.h"
 #define CPU900_EXTERN
@@ -8,7 +9,6 @@
 #include "gen900.h"
 #include "logic.h"
 #include "run.h"
-#include "gen_waits.h"                          /* the loops where the game waits, for asm_interp */
 
 /* d3 (flags: C bit 0, V 1, Z 2, S 3, H 5, N 6), d4-d7 (XWA..XHL of the current bank), a2-a5 (XIX..XSP) */
 uint32_t asm_regs[9];
@@ -43,14 +43,14 @@ void asm_regs_in(void)
     for (i = 0; i < 4; i++) { asm_regs[1 + i] = cpu.cur[i]; asm_regs[5 + i] = cpu.gpr[i]; }
     asm_regs[0] = d3_of_sr[cpu.sr & 0xd7];
 }
-uint32_t asm_step(uint32_t pc)
+/* an instruction with no inline 68k form: its op_ function (gen_ops.c, recomp900.op_body) on the CPU state */
+uint32_t asm_op(uint32_t (*op)(void))
 {
+    uint32_t r;
     asm_regs_out();
-    cpu.pc = pc;
-    do cpu_step(); while (cpu.pc == pc && !cpu.bad);
-    if (cpu.bad) ngp_fatal(pc, 1);
+    r = op();
     asm_regs_in();
-    return cpu.pc;
+    return r;
 }
 void asm_wait(uint32_t pc) { asm_regs_out(); ngp_wait(pc); asm_regs_in(); }
 void asm_poll(uint32_t pc) { asm_regs_out(); ngp_poll(pc); asm_regs_in(); }
@@ -93,46 +93,5 @@ uint32_t asm_ldir(uint32_t dst, uint32_t src, uint32_t n, int32_t step)
     if (size == 1) for (i = 0; i < n; i++) { WR8(dst, RD8(src)); dst += (uint32_t)step; src += (uint32_t)step; }
     else for (i = 0; i < n; i++) { WR16(dst, RD16(src)); dst += (uint32_t)step; src += (uint32_t)step; }
     return bytes;
-}
-/* Code the traces never reached (dispatch found no function for it): the interpreter runs it, as run_interp.c does,
-   until it returns from where it was entered, and the address it returns to is the result, as a function's.
-   Tracing more of the game (tools/explore_ngpc.sh) makes this rare; asm_interp_calls counts it. */
-uint32_t asm_interp_calls;
-uint32_t asm_interp(uint32_t pc)
-{
-    int depth = 0;
-    asm_regs_out();
-    asm_interp_calls++;
-    cpu.pc = pc;
-    for (;;) {
-        uint32_t pc0 = cpu.pc, sp0, i;
-        uint8_t f, op = 0;
-        int at = -1, call = 0, ret = 0;
-        if (ngp_fatal_why) break;
-        if (pc0 >= 0xff0000) {                  /* a BIOS address: it behaves like a subroutine that returns */
-            uint32_t r = ngp_bios_entry(pc0);
-            if (!depth) { asm_regs_in(); return r; }
-            depth--; cpu.pc = r; continue;
-        }
-        f = mem_r8(pc0);
-        if (f == 0x05) { cpu.pc = pc0 + 1; ngp_wait(cpu.pc); continue; }                   /* HALT */
-        if (f == 0xf9) { cpu.pc = pc0 + 1; ngp_bios_call(cpu.bank[3][0] >> 8 & 0xff); continue; }   /* SWI 1 */
-        if (f >= 0xf8) { ngp_fatal(pc0, 1); break; }
-        if (f == 0x1c || f == 0x1d || f == 0x1e) call = 1;
-        else if (f == 0x0e || f == 0x0f || f == 0x07) ret = 1;
-        else if (f >= 0xb0 && f <= 0xb7) at = 1; else if (f >= 0xb8 && f <= 0xbf) at = 2; else if (f == 0xf0 || f == 0xf4 || f == 0xf5) at = 2;
-        else if (f == 0xf1) at = 3; else if (f == 0xf2) at = 4; else if (f == 0xf3) at = (mem_r8(pc0 + 1) & 3) == 0 ? 2 : 4;
-        if (at > 0) { op = mem_r8(pc0 + (uint32_t)at); if (op >= 0xe0 && op <= 0xef) call = 1; else if (op >= 0xf0 && f == 0xb0) ret = 1; }
-        sp0 = cpu.gpr[3];
-        cpu_step();
-        if (cpu.bad) { ngp_fatal(pc0, 1); break; }
-        if (call && cpu.gpr[3] == sp0 - 4) depth++;                                        /* taken */
-        else if (ret && cpu.gpr[3] != sp0) { if (!depth) { asm_regs_in(); return cpu.pc; } depth--; }
-        else if (cpu.pc < pc0)                  /* a wait loop's branch back, taken */
-            for (i = 0; i < sizeof gen_waits / sizeof gen_waits[0]; i++)
-                if (gen_waits[i].pc == pc0) { if (gen_waits[i].kind == 1) ngp_wait(cpu.pc); else ngp_poll(cpu.pc); break; }
-    }
-    asm_regs_in();
-    return 0;
 }
 uint32_t run_call(uint32_t pc) { return asm_call(pc); }

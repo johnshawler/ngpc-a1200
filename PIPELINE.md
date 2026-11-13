@@ -69,7 +69,7 @@ backlog is in history/llb/PIPELINE.md.
 | Priority | Item | Why |
 | --- | --- | --- |
 | 0 | FEASIBILITY.md for the brief's route (hardware-scrolled tile map, sprites, kit objects), approved by the user; then that display | the port fails the brief without it |
-| 0 | No interpreter at run time: native DIV, LDF, CPIR and the other stepped forms; untranslated code found by tracing, not interpreted | tools/check_rules.py |
+| 0 | ~~No interpreter at run time~~ done: DIV, LDF, CPIR, EX (mem), PUSH/POP SR, RETI and calls through registers are op_ functions in `gen_ops.c` (`recomp900.op_body`), proven equal to the interpreter over four 3,600-tick inputs; code the traces never reached stops the game (reason 2) | tools/check_rules.py: passes |
 | 1 | The display: `draw_cell`, overlay and sprite loops in assembly (only while the per-pixel display remains) | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, a word routine for video memory (map cells are words) | logic is 38% of the machine |
 | 3 | Sound: more input scripts so the recorder sees every song and effect; stereo | commands the bench never sends are silent |

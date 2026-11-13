@@ -215,8 +215,6 @@ int main(int argc, char **argv)
     disp_close();
     sys_free_all();
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
-    {   extern ULONG asm_interp_calls;
-        if (asm_interp_calls) printf("code the traces had not reached ran through the interpreter %lu times (tools/explore_ngpc.sh)\n", (unsigned long)asm_interp_calls); }
     if (bench) {
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
         sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu pics=%lu/%lu draw_cck=%lu conv_cck=%lu",

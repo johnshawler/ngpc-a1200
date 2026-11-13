@@ -119,8 +119,8 @@ sound processor's frame of time, and the interrupts it raised.
   the frame model would need cycle budgets. Neo Turf Masters: at most 65% of a frame in the bench.
 - **Routines stored as pointers.** Games keep task lists and state machines as code addresses in RAM and call
   through them. The translator only knows the targets the traces saw. On the host a target it does not know
-  stops the run with reason 2 and the address, so gaps show; on the Amiga the 68k back end runs such code through
-  the interpreter until it returns (`asm_interp` in `run68k.c`) and the program says at exit how often. A jump
+  stops the run with reason 2 and the address, so gaps show; the Amiga program stops the same way (the brief
+  forbids interpreting the original CPU at run time: `tools/check_rules.py` fails a port that does). A jump
   table entry may point at the instruction right after the jump: the tracers log those too.
 - **Coverage is what makes a port playable.** The bench's trace was enough for the bench and nothing else: left
   at the title, Neo Turf Masters reached untranslated code within a minute (its attract mode), and 8 of 8 random
@@ -129,8 +129,12 @@ sound processor's frame of time, and the interrupts it raised.
   port's own frame model, so it traces exactly what the port reaches) and added to
   `tools/flow_ngpc/<game>_explore.txt`, then it translates again. For Neo Turf Masters: 583 functions from the
   bench, 740 with an idle, a tapping and a random ten-minute script, 976 after 26 rounds of exploration, when 1 in
-  30 random ten-minute scripts still found something new, late in the run. The interpreter fallback covers the
-  rest.
+  30 random ten-minute scripts still found something new, late in the run. What is still missing stops the game,
+  so keep exploring until the scripts stop finding anything.
+- **Instructions with no inline form** (DIV, CPIR, EX with memory, PUSH/POP SR, LDF, RETI, calls and jumps
+  through registers in the C back end) are one C function each, `op_<address>()` in `gen_ops.c`, written by
+  `recomp900.op_body` from the decoded instruction with `cpu900.h`'s primitives and called by both back ends.
+  They decode nothing at run time; `verify_ngpc.sh` proves them like the rest.
 - **Not modelled in the frame model yet**: interrupts of the main CPU's timers (so no raster effects), the
   blanking flag and raster position at `0x8010`/`0x8009` (they read 0), micro DMA.
 - The checksum covers the 16 KB of RAM, the K2GE's memory, the ports and the registers.

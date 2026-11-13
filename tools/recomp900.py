@@ -412,6 +412,60 @@ def native(d, live):
         return ' '.join(['do { WR%d(%s, RD%d(%s)); %s += %d; %s += %d; } while (--W16(R + 1, 0));' % (s * 8, dp, s * 8, sp_, dp, step, sp_, step)] + flags)
     return None
 
+# ---- instructions with no inline form: one C function each, called by both back ends ----
+ops_needed = {}                                             # address -> C body of op_<address>(): the next pc
+def op_body(a, d):
+    """C statements of op_<a>() for an instruction the back ends do not write inline: it works on the CPU state
+    (registers in cpu, flags in cpu.sr, with cpu900.h's primitives, as the instruction's case there does) and
+    returns the address where execution goes on. Decoded here, once: nothing is decoded at run time."""
+    m, ops, s = d.mnem, d.ops, d.size
+    kinds = tuple(o[0] for o in ops)
+    fall = (a + d.length) & 0xffffff
+    kind, cc, target = T.flow(d)
+    pre = []
+    def addr(o):
+        st, e = ea_code(o)
+        if st: pre.append(st)
+        return e
+    def src(o, size):
+        if o[0] == 'r': return '(uint32_t)%s' % reg(o[1], o[2])
+        if o[0] == 'i': return '0x%xu' % (o[1] & 0xffffffff)
+        return 'cpu_rd(%d, %s)' % (size, addr(o))
+    guard = 'if (!cpu_cond(%d)) return 0x%06x; ' % (cc, fall) if isinstance(cc, int) else ''
+    if m in ('div', 'divs') and kinds[0] == 'r' and s in (1, 2):
+        v = src(ops[1], s); r = reg(ops[0][1], ops[0][2])
+        return pre + ['xa = %s;' % v, '%s = cpu_div(%d, %s, xa, %d);' % (r, s, r, m == 'divs'), 'return 0x%06x;' % fall]
+    if m in ('cpi', 'cpir', 'cpd', 'cpdr') and kinds == ('r', 'm') and s in (1, 2):
+        p = '&%s' % reg(4, ops[1][2]); step = -s if m in ('cpd', 'cpdr') else s
+        loop = ('uint32_t *p = %s; do { uint16_t c = cpu.sr & F_C; cpu_alu(7, %d, cpu_getr(%d, 0xe0), cpu_rd(%d, *p)); *p += (uint32_t)(%d);'
+                ' xa = (cpu_getr(2, 0xe4) - 1) & 0xffff; cpu_setr(2, 0xe4, xa); cpu.sr = (uint16_t)((cpu.sr & ~(F_C | F_V)) | c | (xa ? F_V : 0)); }'
+                ' while (%s);' % (p, s, s, s, step, 'xa && !(cpu.sr & F_Z)' if m in ('cpir', 'cpdr') else '0'))
+        return ['{ ' + loop + ' }', 'return 0x%06x;' % fall]
+    if m == 'ex' and kinds in (('m', 'r'), ('r', 'm')):
+        mo, ro = (ops[0], ops[1]) if kinds[0] == 'm' else (ops[1], ops[0])
+        e = addr(mo); r = reg(ro[1], ro[2])
+        return pre + ['xe = %s; xa = cpu_rd(%d, xe); cpu_wr(%d, xe, %s); %s = xa;' % (e, s, s, r, r), 'return 0x%06x;' % fall]
+    if m == 'push' and kinds == ('sr',): return ['cpu_push(2, cpu.sr);', 'return 0x%06x;' % fall]
+    if m == 'pop' and kinds == ('sr',): return ['cpu_set_sr((uint16_t)cpu_pop(2));', 'return 0x%06x;' % fall]
+    if m in ('ldf', 'incf', 'decf'):
+        rfp = '%d' % (ops[0][1] & 3) if m == 'ldf' else '((cpu.sr >> 8) %s 1) & 3' % ('+' if m == 'incf' else '-')
+        return ['cpu.sr = (uint16_t)((cpu.sr & ~0x0700) | ((%s) << 8)); CPU_RFP_SET();' % rfp, 'return 0x%06x;' % fall]
+    if kind == 'ret' and m == 'reti': return [guard + 'cpu_set_sr((uint16_t)cpu_pop(2)); xa = cpu_pop(4); cpu.cr[0x3c]--;', 'return xa & 0xffffff;']
+    if kind == 'ret' and m == 'retd':
+        return [guard + 'xa = cpu_pop(4); XSP += (uint32_t)(int32_t)(%d);' % ops[0][1], 'return xa & 0xffffff;']
+    if kind == 'ret' and m == 'ret': return [guard + 'return cpu_pop(4) & 0xffffff;']
+    if kind in ('jump', 'branch') and m == 'djnz':
+        r = reg(ops[0][1], ops[0][2]); return ['if (--%s) return 0x%06x;' % (r, target), 'return 0x%06x;' % fall]
+    if kind in ('jump', 'call') and target is None and ops and ops[-1][0] == 'm':
+        e = addr(ops[-1])
+        body = pre + ['xe = (%s) & 0xffffff;' % e] + (['cpu_push(4, 0x%06x);' % fall] if kind == 'call' else []) + ['return xe;']
+        return ([guard.strip()] if guard else []) + body
+    raise ValueError('no native form for %06x %s' % (a, T.fmt(d)))
+def need_op(a):
+    """the name of the C function for the instruction at a (made the first time it is asked for)"""
+    if a not in ops_needed: ops_needed[a] = op_body(a, insn(a))
+    return 'op_%06x' % a
+
 # ---- liveness of the flags ----
 in_use = collections.defaultdict(int)                       # flags a function reads from cpu.sr when it is entered
 ret_live = collections.defaultdict(int)                     # flags its callers read after it returns: what its RET stores
@@ -569,20 +623,20 @@ def gen_function(entry):
         kind, cc, target = T.flow(d)
         cond = None if cc in (None, 'djnz') else CC_EXPR[cc]
         li, lo = live_in[a], live_out[a]
-        step = ' '.join(x for x in (savef(li), 'STEP(0x%06x); R = cpu.cur;' % a) if x)
+        step = lambda: ' '.join(x for x in (savef(li), 'cpu.pc = %s(); R = cpu.cur;' % need_op(a)) if x)
         ft = True
         if kind is None:
             c = native(d, lo)
             if c: L.append(c); stats['native'] += 1
             else:
-                L.append(step); L.append(loadf(lo)); stats['step'] += 1; step_forms[T.fmt(d).split()[0]] += 1
+                L.append(step()); L.append(loadf(lo)); stats['step'] += 1; step_forms[T.fmt(d).split()[0]] += 1
         elif kind == 'halt': L.append('%s ngp_wait(0x%06x); R = cpu.cur; %s' % (savef(ALLF), fall, loadf(lo)))
         elif kind == 'swi':
             if d.ops[0][1] == 1: L.append('ngp_bios_call(cpu.bank[3][0] >> 8 & 0xff);')
             else: L.append('ngp_fatal(0x%06x, 1); return 0;' % a); ft = False
         elif kind == 'ret':
             if d.mnem == 'ret' and NATIVE: pop = '%s return POP32() & 0xffffff;' % savef(ret_live[entry] if PRECISE_RET else ALLF)
-            else: pop = step + ' return cpu.pc;'            # RETD and RETI: by the step
+            else: pop = step() + ' return cpu.pc;'          # RETD and RETI: op_ functions
             if cc is None: L.append(pop); ft = False
             else: L.append('if (%s) { %s }' % (cond, pop))
         elif kind in ('jump', 'branch'):
@@ -599,8 +653,8 @@ def gen_function(entry):
             else:                                           # through a register or memory: the traces' targets
                 cases = ' '.join('case 0x%06x: %s' % (t, goto(t)) for t in sorted(ind_jump.get(a, ())))
                 sw = 'switch (cpu.pc) { %s default: return ngp_dispatch(cpu.pc); }' % cases
-                if cond: L.append('%s if (cpu.pc != 0x%06x) %s' % (step, fall, sw))
-                else: L.append('%s %s' % (step, sw)); ft = False
+                if cond: L.append('%s if (cpu.pc != 0x%06x) %s' % (step(), fall, sw))
+                else: L.append('%s %s' % (step(), sw)); ft = False
         elif kind == 'call':
             ret = fall
             if target is not None:
@@ -608,7 +662,7 @@ def gen_function(entry):
                 c = '%s PUSH32(0x%06xu); r = %s; if (r != 0x%06x) return r; R = cpu.cur; %s' % (savef(exit_flags(target)), ret, callee, ret, loadf(lo))
                 L.append('if (%s) { %s }' % (cond, c) if cond else c)
             else:
-                L.append('%s if (cpu.pc != 0x%06x) { r = ngp_dispatch(cpu.pc); if (r != 0x%06x) return r; R = cpu.cur; %s }' % (step, fall, ret, loadf(lo)))
+                L.append('%s if (cpu.pc != 0x%06x) { r = ngp_dispatch(cpu.pc); if (r != 0x%06x) return r; R = cpu.cur; %s }' % (step(), fall, ret, loadf(lo)))
         if ft and nxt != fall: L.append(goto(fall))
         lines.append((a, L, T.fmt(d)))
     out = ['uint32_t %s(void)\n{\n    uint32_t *R = cpu.cur, r, t, xa, xb, xc, xr, xe; unsigned fS = 0, fZ = 0, fH = 0, fV = 0, fN = 0, fC = 0;\n'
@@ -626,7 +680,6 @@ HDR = '''/* generated by tools/recomp900.py from the game's ROM: do not edit */
 #include "gen900.h"
 #include "logic.h"
 #include "gen_code.h"
-#define STEP(a) do { cpu.pc = (a); cpu_step(); } while (cpu.pc == (a))     /* LDIR and its kind repeat themselves */
 '''
 
 os.makedirs(outdir, exist_ok=True)
@@ -647,6 +700,8 @@ for i, texts in enumerate(files):
 with open(os.path.join(outdir, 'gen_code.h'), 'w') as f:
     f.write('/* generated by tools/recomp900.py: do not edit */\n#include <stdint.h>\nuint32_t ngp_dispatch(uint32_t pc);\n')
     f.write('\n'.join('uint32_t %s(void);' % fname(e) for e in order) + '\n')
+    ops_in_header = set(ops_needed)
+    f.write('\n'.join('uint32_t op_%06x(void);' % a for a in sorted(ops_needed)) + '\n')
 with open(os.path.join(outdir, 'gen_dispatch.c'), 'w') as f:
     f.write(HDR + '\n/* run the code at pc until it returns: gives the address where execution goes on */\n'
             'uint32_t ngp_dispatch(uint32_t pc)\n{\n    if (pc >= 0xff0000) return ngp_bios_entry(pc);\n    switch (pc) {\n')
@@ -665,6 +720,15 @@ if os.environ.get('NGP_NO68K') != '1':          # the 68k back end for the Amiga
     import back900
     back900.generate(globals(), os.path.join(outdir, 'gen68k.s'))
 
+with open(os.path.join(outdir, 'gen_ops.c'), 'w') as f:      # after both back ends: what either asked for
+    f.write(HDR + '\n/* instructions with no inline form (see op_body in tools/recomp900.py): the next pc */\n')
+    for a in sorted(ops_needed):
+        f.write('uint32_t op_%06x(void)   /* %s */\n{\n    uint32_t *R = cpu.cur, xa, xe; (void)R; (void)xa; (void)xe;\n    %s\n}\n'
+                % (a, T.fmt(insn(a)), '\n    '.join(ops_needed[a])))
+    gen_ops_count = len(ops_needed)
+with open(os.path.join(outdir, 'gen_code.h'), 'a') as f:
+    f.write('\n'.join('uint32_t op_%06x(void);' % a for a in sorted(ops_needed) if a not in ops_in_header) + '\n')
+
 decoded = set()
 for e in order: decoded |= set(body(e))
 missing = sorted(a for a in executed if in_rom(a) and a not in decoded)
@@ -672,7 +736,7 @@ total = stats['native'] + stats['step']
 print('entries %d, instructions %d in %d files (seen in the traces: %d, traced but not translated: %d), wait loops %d (%d frame, %d poll)'
       % (len(order), len(decoded), len(files), len(executed), len(missing), len(all_waits),
          sum(1 for k in all_waits.values() if k == 1), sum(1 for k in all_waits.values() if k == 2)))
-print('non-flow instructions: %d native, %d through the interpreter step (%.0f%%); flags settled in %d rounds' % (stats['native'], stats['step'], 100.0 * stats['step'] / max(total, 1), rounds))
-if step_forms: print('  most frequent through the step:', ' '.join('%s:%d' % kv for kv in step_forms.most_common(14)))
+print('non-flow instructions: %d inline, %d as op_ functions (%.0f%%; %d in gen_ops.c for both back ends); flags settled in %d rounds' % (stats['native'], stats['step'], 100.0 * stats['step'] / max(total, 1), len(ops_needed), rounds))
+if step_forms: print('  most frequent as op_ functions:', ' '.join('%s:%d' % kv for kv in step_forms.most_common(14)))
 if missing: print('  traced but not translated, first:', ' '.join('%06x' % a for a in missing[:12]))
 if ram_code: print('  WARNING: the traces executed code outside the cartridge (in RAM): %d addresses from %06x. Not translated.' % (len(ram_code), ram_code[0]))

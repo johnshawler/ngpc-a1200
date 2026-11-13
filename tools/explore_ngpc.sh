@@ -63,7 +63,7 @@ PY
   python3 -I - port.conf <<'PY'
 import sys, re, glob
 conf = open(sys.argv[1]).read()
-gen = ' '.join(['src/ngpc/gen_dispatch.c'] + sorted(glob.glob('src/ngpc/gen_[0-9]*.c')))
+gen = ' '.join(['src/ngpc/gen_dispatch.c', 'src/ngpc/gen_ops.c'] + sorted(glob.glob('src/ngpc/gen_[0-9]*.c')))
 new = re.sub(r'^GEN="[^"]*"', 'GEN="%s"' % gen, conf, flags=re.M)
 if new != conf: open(sys.argv[1], 'w').write(new)
 PY

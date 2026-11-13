@@ -12,7 +12,7 @@ IN=""; [ -n "$2" ] && IN="-i $(realpath "$2")"
 OUT=${TMPDIR:-/tmp}/verify_ngpc.$$
 mkdir -p "$OUT"
 COMMON="src/ngpc/host_test.c src/ngpc/logic.c src/ngpc/ngp.c src/ngpc/k2ge.c src/coro_host.c"
-cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc $COMMON src/ngpc/run_c.c src/ngpc/gen_dispatch.c src/ngpc/gen_[0-9]*.c -o "$OUT/translated"
+cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc $COMMON src/ngpc/run_c.c src/ngpc/gen_dispatch.c src/ngpc/gen_ops.c src/ngpc/gen_[0-9]*.c -o "$OUT/translated"
 cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc $COMMON src/ngpc/run_interp.c -o "$OUT/interpreted"
 "$OUT/translated" "$N" $IN -r "$OUT/t.bin" | tail -1
 "$OUT/interpreted" "$N" $IN -r "$OUT/i.bin" | tail -1
