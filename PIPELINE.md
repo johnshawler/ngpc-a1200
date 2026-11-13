@@ -56,8 +56,9 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: referee PASS as a per-pixel game with 4 MB fast RAM, game time at 95% of the clock, 4.5 new pictures a second
-(the game makes 13.7),
+Status: FAIL. Judged as the brief requires (class planar): late=1927, worst_pct=1836 with 4 MB fast RAM, and
+tools/check_rules.py fails the run-time interpreter and the missing approved plan. It was built per-pixel against the
+brief's route for a 2D game. Game time at 95% of the clock, 4.5 new pictures a second (the game makes 13.7),
 checksum equal; music and effects recorded from the game's own sound program (93-98% of sounding frames as the real
 driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 22,751 colour clocks a
 tick over the bench (38% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
@@ -67,7 +68,9 @@ backlog is in history/llb/PIPELINE.md.
 
 | Priority | Item | Why |
 | --- | --- | --- |
-| 1 | The display: `draw_cell`, overlay and sprite loops in assembly | 250k colour clocks a picture |
+| 0 | FEASIBILITY.md for the brief's route (hardware-scrolled tile map, sprites, kit objects), approved by the user; then that display | the port fails the brief without it |
+| 0 | No interpreter at run time: native DIV, LDF, CPIR and the other stepped forms; untranslated code found by tracing, not interpreted | tools/check_rules.py |
+| 1 | The display: `draw_cell`, overlay and sprite loops in assembly (only while the per-pixel display remains) | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, a word routine for video memory (map cells are words) | logic is 38% of the machine |
 | 3 | Sound: more input scripts so the recorder sees every song and effect; stereo | commands the bench never sends are silent |
 | 4 | Ticks that take several frames alone (scene changes: 16,000 instructions and 7,600 video bytes in one tick, 9.5 frames): video writes and copies faster | the rest of the lost game time |

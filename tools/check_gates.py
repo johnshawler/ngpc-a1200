@@ -31,6 +31,7 @@ def main():
         if opt.get(key):
             want = opt[key].lower().zfill(8)
             if f['checksum'].lower().zfill(8) != want: problems.append('checksum %s differs from the %s %s' % (f['checksum'], name, want))
+    print('class=%s (the gates applied)' % cls)
     print('frames=%s late=%s worst_pct=%s avg_pct=%s shown_fps=%s ticks=%s checksum=%s' % (f['frames'], f['late'], f['worst_pct'], f.get('avg_pct', '?'), f['shown_fps'], f['ticks'], f['checksum']))
     if 'game_speed' in f: print('game_speed=%s%%: game time against the clock (100 = kept)' % f['game_speed'])
     if not opt.get('--host') and not opt.get('--expect'): print('note: no host test in port.conf, so the checksum was not compared')

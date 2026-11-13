@@ -1,4 +1,10 @@
 PORT REPORT
+Verdict:               FAIL. The port departed from the brief: it was classed per-pixel (soft gates) although Neo Turf
+                       Masters is a 2D tile and sprite game, and it interprets the original CPU at run time for
+                       untranslated code and 25 instruction forms. Judged as the brief requires (class planar), it
+                       fails late=0 and worst_pct <= 80, and tools/check_rules.py fails it on the run-time interpreter
+                       and on the missing approved plan (FEASIBILITY.md). The PASS lines below were printed under the
+                       per-pixel class and do not stand.
 Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World release, 2 MB cartridge, 60 Hz).
                        Work in progress: correct, plays through the bench on the emulated A1200 with fast RAM, with
                        its music and sound effects, not yet at full speed.
@@ -10,7 +16,8 @@ Class and route:       Binary TLCS-900/H code. The Step 1 table has no row for t
                        (src/ngpc/ngp.c). The Z80 sound
                        program is not run at all on the Amiga: what the game sees of it (an answer to each command, a
                        tick counter) is modelled, and tools/check_sound_ngpc.sh proves the model against the real
-                       program, tick by tick. The display class is per-pixel (CLASS=perpixel), for the reasons below.
+                       program, tick by tick. The display was built per-pixel (CLASS=perpixel, now planar in port.conf): the
+                       brief's route for this game is a hardware-scrolled tile map with sprites and kit objects.
 Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colours=256 (the K2GE's 256 palette entries
                        are the pens). The 160 x 152 picture at its own size in the middle of a black 320 x 256 screen
                        (the user's choice). Drawn into a byte buffer by k2ge_frame_cached (scroll planes kept drawn,
@@ -38,9 +45,12 @@ With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks, AROS ROM):
                        frames=1228 late=1927 worst_cck=1305193 avg_cck=137618 budget_cck=71051 worst_pct=1836 avg_pct=193 display_hz=50 shown_fps=19.4
                        ticks=3600 checksum=ac36a76c game_speed=95%
                        logic_cck=22728 max=451619 pics=287/473 draw_cck=181671 conv_cck=71175
-                       PASS on both (per-pixel game: 19.4 pictures a second, game time at 95% of the clock: it falls
-                       behind where a pass takes more than 8 frames; shown_fps counts passes: see the frame rate
-                       claim). With sound playing. A pass whose ticks took over 2 frames draws no new picture (at most
+                       Printed at the time: PASS on both (per-pixel game: 19.4 pictures a second, game time at 95%).
+                       The same bench under the brief's gates (python3 tools/check_gates.py bench_fast.txt --class
+                       planar --ticks 3600 --host ac36a76c):
+                       FAIL: late=1927: 1927 vertical blanks went by without a new picture (must be 0)
+                       FAIL: worst_pct=1836: the slowest frame is over 80% of the budget
+                       With sound playing. A pass whose ticks took over 2 frames draws no new picture (at most
                        8 in a row); without that rule (and before block copies were one call): 15.1 and 83%.
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals

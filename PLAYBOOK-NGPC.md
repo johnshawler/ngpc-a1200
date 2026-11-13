@@ -12,9 +12,11 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, with its music and effects, and the referee passes it as a per-pixel game (game time at 95% of the
-clock; 4.5 new pictures a second of the 13.7 the game makes; the kit's shown_fps, 19.5, counts passes).
-What a finished port still needs is in section 8: a faster display, somewhat faster logic, and sound.
+a black border, with its music and effects. It FAILS the brief: its display rebuilds each picture in software (the
+per-pixel class, which the brief keeps for per-pixel renderers; 4.5 new pictures a second of the 13.7 the game makes,
+late=1927 in the bench), and it interprets untranslated code at run time. The brief's route for a Neo Geo Pocket game
+is a hardware-scrolled tile map with sprites and kit objects; that display is not built yet. Start a port with an
+approved FEASIBILITY.md (CLAUDE.md, tools/check_rules.py).
 
 ## 1. What is reusable, what is per game
 
