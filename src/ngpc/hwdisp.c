@@ -51,7 +51,8 @@ static uint32_t blackm[NCOL], coursem[NCOL];     /* per column, bit r: row r is 
 static uint8_t col_ok[NCOL];                     /* 1 or 2: every row of the column is in that state (0: not known) */
 static uint16_t bmap[1024];                     /* the back plane's map as the tiles were made from it */
 static int pal_refs[16];                        /* back map cells per palette */
-static int8_t key_slot[32], slot_key[NSLOT];    /* key: 0-15 back plane palette, 16-31 sprite palette */
+static int8_t key_slot[32], slot_key[NSLOT];
+static unsigned slot_epoch = 1;                 /* +1 whenever a slot is given out, taken back or aliased */    /* key: 0-15 back plane palette, 16-31 sprite palette */
 static uint8_t key_alias[32], sprite_used[16];
 static uint8_t char_empty[512];
 static uint16_t *tilebuf;
@@ -121,7 +122,7 @@ static void slot_free(int s)
 {
     int k = slot_key[s];
     if (k < 0) return;
-    key_slot[k] = -1; slot_key[s] = -1;
+    key_slot[k] = -1; slot_key[s] = -1; slot_epoch++;
     if (k >= 16) clear_cache();
 }
 static void inval_back_pal(int pal);
@@ -131,14 +132,14 @@ static int get_slot(int key)
     if (key_slot[key] >= 0) return key_slot[key];
     for (s = 0; s < NSLOT; s++) if (slot_key[s] < 0) break;
     if (s == NSLOT) for (s = 0; s < NSLOT; s++) if (!key_in_use(slot_key[s])) { slot_free(s); break; }
-    if (s < NSLOT) { slot_key[s] = (int8_t)key; key_slot[key] = (int8_t)s; key_alias[key] = 0; colours_changed = 1; return s; }
+    if (s < NSLOT) { slot_key[s] = (int8_t)key; key_slot[key] = (int8_t)s; key_alias[key] = 0; colours_changed = 1; slot_epoch++; return s; }
     for (s = 0; s < NSLOT; s++) {               /* no slot: the slot with the nearest colours (FEASIBILITY.md cut) */
         int c, d = 0;
         for (c = 1; c < 4; c++) d += coldist(slotkey_col12(key, c), slotkey_col12(slot_key[s], c));
         if (d < bd) { bd = d; best = s; }
     }
     hwdisp_last.slot_misses++;
-    key_alias[key] = 1;
+    key_alias[key] = 1; slot_epoch++;
     return best;
 }
 static int slot_of(int key) { int s = key_slot[key]; return s >= 0 && !key_alias[key] ? s : -1; }
@@ -150,7 +151,7 @@ HWFN void hw_retry_aliases(void)
         for (s = 0; s < NSLOT; s++) if (slot_key[s] < 0 || !key_in_use(slot_key[s])) break;
         if (s == NSLOT) return;
         if (slot_key[s] >= 0) slot_free(s);
-        slot_key[s] = (int8_t)k; key_slot[k] = (int8_t)s; key_alias[k] = 0; colours_changed = 1;
+        slot_key[s] = (int8_t)k; key_slot[k] = (int8_t)s; key_alias[k] = 0; colours_changed = 1; slot_epoch++;
         if (k < 16) inval_back_pal(k); else clear_cache();
     }
 }
@@ -169,11 +170,14 @@ static uint16_t chr_gen[512], pal_gen[16];      /* versions of each character an
 static uint32_t tab4[16][256];
 static uint16_t tab2[16][256];
 static uint8_t tab_pen[16][3], tab_ok[16], rev8[256];
+static unsigned tab_epoch[16];
 HWFN void hw_key_table(int key)
 {
     int pens[4], b, j, p;
+    if (tab_ok[key] && tab_epoch[key] == slot_epoch) return;     /* no slot given out since: the same pens */
     pens[0] = 1;
     for (j = 1; j < 4; j++) pens[j] = pen_of(key, j);
+    tab_epoch[key] = slot_epoch;
     if (tab_ok[key] && tab_pen[key][0] == pens[1] && tab_pen[key][1] == pens[2] && tab_pen[key][2] == pens[3]) return;
     for (b = 0; b < 256; b++) {
         uint32_t v4 = 0; unsigned v2 = 0;
@@ -492,6 +496,20 @@ HWFN void hw_compose_cell(int cx, int cy)
 /* bank entries for the keys: 9-11 the three most used keys in sprite 4's strip (9 black when that strip is at an edge);
    1-8 and 12-15 the most used of the rest, black among them; the others the nearest colour. 1 when the mapping changed. */
 static uint32_t remap_keys[4];                  /* the keys whose entry the last remap changed */
+static unsigned ecol[16];                       /* the colours of the bank entries */
+static void nearest(int k)                      /* the entries key k shows: its own, else the nearest colour */
+{
+    int e, be = 1, bd = 1 << 30, bs = 9, bsd = 1 << 30, np = 0, ns = 0;
+    unsigned c = key_col12(k);
+    for (e = 1; e < 16; e++) if (entry_key[e] == k) { np = e; if (e >= 9 && e <= 11) ns = e; }
+    if (!np || !ns)
+        for (e = 1; e < 16; e++) if (entry_key[e]) {
+            int d = coldist(c, ecol[e]);
+            if (d < bd) { bd = d; be = e; }
+            if (e >= 9 && e <= 11 && d < bsd) { bsd = d; bs = e; }
+        }
+    map_pair[k] = (uint8_t)(np ? np : be); map_s4[k] = (uint8_t)(ns ? ns : bs); map_s4b[k] = (uint8_t)(map_s4[k] - 8);
+}
 HWFN int hw_remap(void)
 {
     static const uint8_t free_e[12] = { 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15 };
@@ -513,20 +531,15 @@ HWFN int hw_remap(void)
         for (k = 1; k < NKEY; k++) if (!taken[k] && key_count[k] > 0 && (best < 0 || key_count[k] > key_count[best])) best = k;
         if (best >= 0) { ek[free_e[j]] = (uint8_t)best; taken[best] = 1; }
     }
-    for (k = 0; k < NKEY; k++) {
-        int e, be = 1, bd = 1 << 30, bs = 9, bsd = 1 << 30;
-        unsigned c = key_col12(k);
-        np[k] = ns[k] = 0;
-        if (!k) continue;
-        for (e = 1; e < 16; e++) if (ek[e] == k) { np[k] = (uint8_t)e; if (e >= 9 && e <= 11) ns[k] = (uint8_t)e; }
-        for (e = 1; e < 16; e++) if (ek[e]) { int d = coldist(c, key_col12(ek[e])); if (d < bd) { bd = d; be = e; } if (e >= 9 && e <= 11 && d < bsd) { bsd = d; bs = e; } }
-        if (!np[k]) np[k] = (uint8_t)be;
-        if (!ns[k]) ns[k] = (uint8_t)bs;
-        if (key_count[k] && (np[k] != map_pair[k] || ns[k] != map_s4[k])) { changed = 1; remap_keys[k >> 5] |= 1u << (k & 31); }
-        map_pair[k] = np[k]; map_s4[k] = ns[k]; map_s4b[k] = (uint8_t)(k ? ns[k] - 8 : 0);
-    }
     if (memcmp(entry_key, ek, sizeof ek)) colours_changed = 1;
     memcpy(entry_key, ek, sizeof ek);
+    for (j = 1; j < 16; j++) ecol[j] = ek[j] ? key_col12(ek[j]) : 0;
+    for (k = 1; k < NKEY; k++) {
+        if (!key_count[k]) { map_pair[k] = map_s4[k] = map_s4b[k] = 255; continue; }   /* worked out when first used */
+        np[k] = map_pair[k]; ns[k] = map_s4[k];
+        nearest(k);
+        if (np[k] != map_pair[k] || ns[k] != map_s4[k]) { changed = 1; remap_keys[k >> 5] |= 1u << (k & 31); }
+    }
     for (k = 0; k < NKEY; k++) key_present[k] = key_count[k] > 0;
     return changed;
 }
@@ -562,7 +575,7 @@ HWFN void hw_convert_cell(int b, int cx, int cy)
         if (y >= HW_VIEW_H) break;
         {   const uint8_t *kr = keybuf[y] + cx * 8;   /* 8 pixels: shift all four planes' bytes at once */
             uint32_t acc = 0;
-            for (i = 0; i < 8; i++) acc = acc << 1 | spread[mp[kr[i]]];
+            for (i = 0; i < 8; i++) { int k = kr[i]; if (mp[k] == 255) nearest(k); acc = acc << 1 | spread[mp[k]]; }
             p0 = acc & 255; p1 = (acc >> 8) & 255; p2 = (acc >> 16) & 255; p3 = acc >> 24;
         }
         le = ev + 8 + y * 8; lo = od ? od + 8 + y * 8 : 0;
@@ -690,17 +703,20 @@ HWFN void hw_find_objects(void)
     nobj = 0;
     for (i = 0; i < nspr; i++) { int r = i; while (par[r] != r) r = par[r]; par[i] = r; oid[i] = -1; }
     for (i = 0; i < nspr; i++) if (par[i] == i) oid[i] = nobj < MAXOBJ ? nobj++ : -1;
-    for (j = 0; j < nobj; j++) {               /* members of each object in sprite order: lower numbers first */
+    for (j = 0; j < nobj; j++) { Obj *o = &obj[j]; o->x0 = o->y0 = 32767; o->x1 = o->y1 = -32768; o->count = 0; }
+    for (i = 0; i < nspr; i++) {               /* sizes and boxes, then members in sprite order (lower numbers first) */
+        int id = oid[par[i]]; Obj *o;
+        if (id < 0) continue;
+        o = &obj[id]; o->count++;
+        if (spr[i].x < o->x0) o->x0 = spr[i].x;
+        if (spr[i].y < o->y0) o->y0 = spr[i].y;
+        if (spr[i].x + 7 > o->x1) o->x1 = spr[i].x + 7;
+        if (spr[i].y + 7 > o->y1) o->y1 = spr[i].y + 7;
+    }
+    for (j = 0; j < nobj; j++) { obj[j].first = (uint8_t)m; m += obj[j].count; obj[j].count = 0; }
+    for (i = 0; i < nspr; i++) { int id = oid[par[i]]; if (id >= 0) members[obj[id].first + obj[id].count++] = (uint8_t)i; }
+    for (j = 0; j < nobj; j++) {
         Obj *o = &obj[j];
-        o->x0 = o->y0 = 32767; o->x1 = o->y1 = -32768; o->count = 0; o->first = (uint8_t)m;
-        for (i = 0; i < nspr; i++) {
-            if (oid[par[i]] != j) continue;
-            members[m++] = (uint8_t)i; o->count++;
-            if (spr[i].x < o->x0) o->x0 = spr[i].x;
-            if (spr[i].y < o->y0) o->y0 = spr[i].y;
-            if (spr[i].x + 7 > o->x1) o->x1 = spr[i].x + 7;
-            if (spr[i].y + 7 > o->y1) o->y1 = spr[i].y + 7;
-        }
         o->front = o->x1 - o->x0 >= 32 || o->y1 - o->y0 >= 32 || hw_front_plane_under(o->x0, o->y0, o->x1, o->y1);
     }
     nfspr = 0;
@@ -793,12 +809,19 @@ int hwdisp_init(void)
     memset(keybuf, 0, sizeof keybuf);
     memset(key_count, 0, sizeof key_count); memset(key_count_s4, 0, sizeof key_count_s4);
     key_count[0] = HW_VIEW_H * FW; key_count_s4[0] = HW_VIEW_H * 64;
-    memset(map_pair, 0, sizeof map_pair); memset(map_s4, 0, sizeof map_s4); memset(entry_key, 0, sizeof entry_key); memset(key_present, 0, sizeof key_present);
+    memset(map_pair, 255, sizeof map_pair); memset(map_s4, 255, sizeof map_s4); memset(map_s4b, 255, sizeof map_s4b);
+    map_pair[0] = map_s4[0] = map_s4b[0] = 0; memset(entry_key, 0, sizeof entry_key); memset(key_present, 0, sizeof key_present);
     fdirty_all(); fdirty_any = 1;
     back_sel = -1; scroll_known = 0; U = 0; frame_no = 0;
     return 1;
 }
 
+static int differ4(const uint8_t *a, const uint8_t *b, int n)   /* memcmp != 0, 4 bytes at a time (libnix's goes by bytes) */
+{
+    int i;
+    for (i = 0; i < n; i += 4) if (L4(a + i) != L4(b + i)) return 1;
+    return 0;
+}
 void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
 {
     int i, sel = (v[0x30] & 0x80) ? 0 : 1, fsx, fsy, blank;
@@ -808,7 +831,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
     front_changed = 0;
     frame_t0 = hw_now();
     {   static uint8_t snap[0x200 + 2]; static int blank_was = -1; int bl = !v[4] || !v[5] || v[2] >= 160 || v[3] >= HW_VIEW_H;
-        palette_moved = colours_changed || bl != blank_was || memcmp(snap, v + 0x200, 0x200) || snap[0x200] != v[0x12] || snap[0x201] != v[0x118];
+        palette_moved = colours_changed || bl != blank_was || differ4(snap, v + 0x200, 0x200) || snap[0x200] != v[0x12] || snap[0x201] != v[0x118];
         if (palette_moved) { memcpy(snap, v + 0x200, 0x200); snap[0x200] = v[0x12]; snap[0x201] = v[0x118]; blank_was = bl; }
     }
     if (!scroll_known) { memset(char_empty, 0, sizeof char_empty); for (i = 0; i < 512; i++) dirty->chr[i] = 1; dirty->any = 1; }
