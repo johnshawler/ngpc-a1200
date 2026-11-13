@@ -70,7 +70,8 @@ backlog is in history/llb/PIPELINE.md.
 | --- | --- | --- |
 | 0 | ~~FEASIBILITY.md approved~~ done: written, accepted by the user in chat; the user then dropped the approval step | tools/check_rules.py |
 | 0 | The display of FEASIBILITY.md: built (`src/ngpc/hwdisp.c`, wired into `main.c`); on the host it matches the reference: course and objects exact in 3,000 of 3,000 pictures on four inputs with no work limit; the front layer differs in 1-4.4% of pixels (15 colours) | `tools/hwdisp_test.c`: done; Amiga bench: not run (needs the approval) |
-| 0 | Display cost on the Amiga: a time limit per frame instead of 4 tiles / 20 cells; a cache of composed 16 x 16 tiles; front cells composed by tables, not per pixel | `late=0`, `worst_pct` <= 80 |
+| 0 | Display cost on the Amiga: done so far: time limit per frame, tables for tiles and front cells, row masks, per-character cell lists (draw 478k -> 49k colour clocks a frame; bench: late=1618 worst_pct=1283 shown_fps=23.3). Next: object finding (6% of the time), the front layer's fixed cost (8k a frame), a cache of composed tiles | draw under ~20k a frame |
+| 0 | Logic peaks: scene setups take up to 451k colour clocks in one tick (6 frames; 15-18x the average on the host too), so frames are late whatever the display does. Profile those ticks and speed up what they run (item 9) | worst tick under ~40k |
 | 0 | ~~No interpreter at run time~~ done: DIV, LDF, CPIR, EX (mem), PUSH/POP SR, RETI and calls through registers are op_ functions in `gen_ops.c` (`recomp900.op_body`), proven equal to the interpreter over four 3,600-tick inputs; code the traces never reached stops the game (reason 2) | tools/check_rules.py: passes |
 | 1 | The display: `draw_cell`, overlay and sprite loops in assembly (only while the per-pixel display remains) | 250k colour clocks a picture |
 | 2 | The 68k back end: flags kept in the CCR until read, a word routine for video memory (map cells are words) | logic is 38% of the machine |
