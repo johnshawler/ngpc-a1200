@@ -13,7 +13,7 @@
 
 #define HW_PLANES   6
 #define HW_LEVEL_W  4096                        /* DispCfg level_w: how far the picture can slide */
-#define HW_BUF_H    408                         /* 256 rows of the plane, then its rows 0-151 again (vertical wrap) */
+#define HW_BUF_H    416                         /* 256 rows of the plane, then its rows 0-159 again (vertical wrap; a multiple of 16) */
 #define HW_VIEW_H   152
 #define HW_WIN_X    80                          /* the Pocket's 160 pixels start here in the 320-pixel view */
 #define HW_SPR_H    152                         /* the front-layer sprites: 64 pixels wide, the picture's height */
@@ -45,7 +45,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty);
 /* what the last hwdisp_frame() did, and totals (for the host test and the bench) */
 typedef struct {
     int tiles, tiles_left, clears, cells, cells_left, bobs, front_objs, slot_misses, remaps, rebases, why_scroll, why_chr, why_objs;
-    uint32_t t_start, t_tiles, t_front, t_objs, composed;     /* hw_now() time of each phase */
+    uint32_t t_start, t_tiles, t_front, t_objs, composed, t_draw;     /* hw_now() time of each phase */
 } HwStats;
 extern HwStats hwdisp_last;
 #endif

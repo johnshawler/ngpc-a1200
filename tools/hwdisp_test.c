@@ -137,7 +137,7 @@ int main(int argc, char **argv)
                 {
                     unsigned c = ref[x - HW_WIN_X];
                     uint32_t r = ((c & 15) * 17u) << 16 | (((c >> 4) & 15) * 17u) << 8 | ((c >> 8) & 15) * 17u;
-                    if (m != r) { wrong++; if (from[y * 320 + x] == 2) bad_spr++; else if (from[y * 320 + x] == 1) bad_obj++; else { bad_pf++; wrong_pf++; } }
+                    if (m != r) { if (getenv("HWWHO") && frames == atoi(getenv("HWWHO")) && from[y * 320 + x] == 0 && !(y % 8) && !(x % 8)) printf("wrong view %d,%d world %d,%d (col %d row %d) written by %d/%d\n", x, y, sc_x + x, sc_y + y, (sc_x + x) / 16, (sc_y + y) / 16, who[rib(sc_x + x, sc_y + y) - ribbon] / 64, who[rib(sc_x + x, sc_y + y) - ribbon] % 64); wrong++; if (from[y * 320 + x] == 2) bad_spr++; else if (from[y * 320 + x] == 1) bad_obj++; else { bad_pf++; wrong_pf++; } }
                 }
             }
         }

@@ -44,11 +44,12 @@ static ULONG palette[256];
 #define FRAME_TARGET (71051UL * 70 / 100)        /* logic and drawing of a pass: 70% of a frame */
 #define DRAW_FLOOR 6000UL                        /* the drawing that always happens: objects, sprites, colours */
 static ULONG logic_at_draw;
+static ULONG ph_draw;
 static ULONG ph_start, ph_tiles, ph_front, ph_objs, ph_composed;   /* colour clocks per phase of the drawing, summed */
 static ULONG draw_total, draw_worst, hw_tiles, hw_cells, hw_behind;   /* the display's cost and work, for bench.txt */
 
 /* what src/ngpc/hwdisp.c asks of the display: the kit's calls */
-void hw_tile(int32_t x, int32_t y, const uint16_t *t) { disp_tile(x, y, (const UWORD *)t); }
+void hw_tile(int32_t x, int32_t y, const uint16_t *t) { disp_tile(x, y, (const UWORD *)t); blit_wait(); }   /* the image may be rewritten next */
 void hw_clear(int32_t x, int32_t y, int32_t w, int32_t h)
 {
     disp_clear(disp_front, x, y, (UWORD)w, (UWORD)h); disp_clear(disp_back, x, y, (UWORD)w, (UWORD)h);
@@ -142,7 +143,7 @@ static void game_draw(void)
     t = sys_now() - t0;
     draw_total += t; if (t > draw_worst) draw_worst = t;
     hw_tiles += hwdisp_last.tiles; hw_cells += hwdisp_last.cells;
-    ph_start += hwdisp_last.t_start; ph_tiles += hwdisp_last.t_tiles; ph_front += hwdisp_last.t_front; ph_objs += hwdisp_last.t_objs; ph_composed += hwdisp_last.composed;
+    ph_start += hwdisp_last.t_start; ph_tiles += hwdisp_last.t_tiles; ph_front += hwdisp_last.t_front; ph_objs += hwdisp_last.t_objs; ph_composed += hwdisp_last.composed; ph_draw += hwdisp_last.t_draw;
     if (hwdisp_last.tiles_left || hwdisp_last.cells_left) hw_behind++;
 }
 
@@ -198,10 +199,12 @@ int main(int argc, char **argv)
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
         /* the note holds 127 characters: per frame, colour clocks of logic (worst tick), drawing (worst), and the drawing's
            phases: st(art), ti(les) with the cost of a tile, fr(ont layer) with the cells composed, ob(jects) */
-        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu st=%lu ti=%lu/%lu fr=%lu/%lu ob=%lu",
+        /* the note holds 127 characters: per frame, colour clocks of logic (worst tick), drawing (worst), and the drawing's
+           phases: st(art), ti(les; dw: drawing them), fr(ont layer) with the cells composed, ob(jects) */
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu st=%lu ti=%lu dw=%lu fr=%lu/%lu ob=%lu",
                 (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
                 (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)(frames ? draw_total / frames : 0),
-                (unsigned long)draw_worst, (unsigned long)(ph_start / frames), (unsigned long)(ph_tiles / frames), (unsigned long)(hw_tiles ? ph_tiles / hw_tiles : 0),
+                (unsigned long)draw_worst, (unsigned long)(ph_start / frames), (unsigned long)(ph_tiles / frames), (unsigned long)(ph_draw / frames),
                 (unsigned long)(ph_front / frames), (unsigned long)ph_composed, (unsigned long)(ph_objs / frames));
         perf_note(text);
 
