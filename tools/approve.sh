@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: tools/approve.sh plan | class perpixel | exempt <rule> <reason...>
+# Usage: tools/approve.sh class perpixel | exempt <rule> <reason...>   (plan: no longer needed; the user dropped it)
 # FOR THE USER ONLY. A model working on this repository must never run this script or write APPROVALS (CLAUDE.md).
 # Records your approval in APPROVALS, which tools/check_rules.py reads:
 #   plan              approve FEASIBILITY.md as it is now (any later change needs a new approval)

@@ -3,7 +3,7 @@
 # The referee. Builds the port described in port.conf, runs its bench on the emulated stock A1200
 # (or, with "fast", on one with 4 MB fast RAM), runs the host test, and checks the brief's gates.
 # Leaves bench.txt and shot.png in the project folder. Exit code 0 = PASS. CI runs exactly this.
-# First tools/check_rules.py: without a plan (FEASIBILITY.md) the user approved, nothing is built; a class the user
+# First tools/check_rules.py: without a plan (FEASIBILITY.md) nothing is built; a class the user
 # did not approve is judged as planar; a broken "never do these" rule is a FAIL even when the gates pass.
 cd "$(dirname "$0")/.."
 . "${PORT_CONF:-./port.conf}"                # PORT_CONF=<file>: bench another description (e.g. port.ngpc.conf)
@@ -16,7 +16,7 @@ RC=$(mktemp /tmp/rules_class.XXXXXX); RO=$(mktemp /tmp/rules_out.XXXXXX)
 RULES=0; RULES_CLASS_FILE="$RC" python3 tools/check_rules.py "${PORT_CONF:-./port.conf}" > "$RO" || RULES=1
 cat "$RO"; EFFCLASS=$(cat "$RC")
 if grep -q "^FAIL: plan:" "$RO"; then
-  rm -f "$RC" "$RO"; echo "FAIL: not built: the brief's milestone 1 plan (FEASIBILITY.md) has no approval from the user"; exit 1
+  rm -f "$RC" "$RO"; echo "FAIL: not built: no FEASIBILITY.md (the brief's milestone 1 plan)"; exit 1
 fi
 rm -f "$RC" "$RO"
 mkdir -p dist

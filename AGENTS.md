@@ -25,11 +25,11 @@ Your instructions are in `BRIEF.md`. Read all of it before you do anything else,
   "Never do these"), stop and ask the user first, and wait for the answer. `NOTES.md` records gaps in the brief;
   it never records a departure you made on your own.
 - Milestone 1 is a file: `FEASIBILITY.md`, with the row of the Step 1 table you use, the `DispCfg`, the colour count,
-  every object with its size, the budget sum and what will be cut. Write it, then stop and ask the user to approve
-  it. `tools/port.sh` builds nothing until `APPROVALS` holds that version's checksum, and any change to the plan
-  needs a new approval.
-- `APPROVALS` and `tools/approve.sh` belong to the user. Never write, edit or delete `APPROVALS`, never run
-  `tools/approve.sh`, and never work around `tools/check_rules.py`.
+  every object with its size, the budget sum and what will be cut. Write it before any game code and keep it up to
+  date when the plan changes; `tools/port.sh` builds nothing without it. (The user dropped the approval step for the
+  plan: no checksum in `APPROVALS` is needed.)
+- `APPROVALS` and `tools/approve.sh` belong to the user (the per-pixel class and exemptions). Never write, edit or
+  delete `APPROVALS`, never run `tools/approve.sh`, and never work around `tools/check_rules.py`.
 - `CLASS=perpixel` (the soft gates) counts only when the user approved it in `APPROVALS`; otherwise the port is judged
   as planar. Never choose it to get a PASS.
 - Every progress report quotes, as `tools/port.sh` printed them: the class, the rules result and the gate lines

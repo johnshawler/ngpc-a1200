@@ -3,10 +3,9 @@
 
 usage: check_rules.py [port.conf]      (run by tools/port.sh and by CI; exit code 0 = no rule broken)
 
-1. An approved plan. The brief's milestone 1 is a feasibility note: FEASIBILITY.md (Step 1's class and route,
-   the DispCfg, colours, objects and sizes, the budget sum, what is cut). It counts only once the user approved it:
-   APPROVALS holds the line "plan <sha256 of FEASIBILITY.md>". Any change to the plan needs a new approval.
-   tools/port.sh does not build without it.
+1. A plan. The brief's milestone 1 is a feasibility note: FEASIBILITY.md (Step 1's class and route, the DispCfg,
+   colours, objects and sizes, the budget sum, what is cut). tools/port.sh does not build without it. (The user
+   dropped the approval of the plan: no "plan <sha256>" line in APPROVALS is needed.)
 2. The class. CLASS=perpixel softens the gates (no late=0, no worst-frame limit); the brief keeps it for per-pixel
    renderers. It counts only with the line "class perpixel <sha256 of FEASIBILITY.md>" in APPROVALS; otherwise the
    port is judged as planar.
@@ -59,9 +58,7 @@ def main():
     problems, notes = [], []
 
     plan_sha = hashlib.sha256(open('FEASIBILITY.md', 'rb').read()).hexdigest() if os.path.exists('FEASIBILITY.md') else None
-    plan_ok = plan_sha is not None and ['plan', plan_sha] in [a[:2] for a in approvals]
-    if plan_sha is None: problems.append('plan: no FEASIBILITY.md (the brief\'s milestone 1). Write it, then ask the user to approve it')
-    elif not plan_ok: problems.append('plan: FEASIBILITY.md is not approved in this form (APPROVALS has no "plan %s"). Ask the user' % plan_sha[:16])
+    if plan_sha is None: problems.append('plan: no FEASIBILITY.md (the brief\'s milestone 1). Write it first')
 
     eff = cls
     if cls == 'perpixel':

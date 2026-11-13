@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: The kit is unchanged
         run: tools/check_kit.sh
-      - name: The brief's rules (an approved plan and class, nothing from "Never do these")
+      - name: The brief's rules (a plan, an approved class, nothing from "Never do these")
         run: python3 tools/check_rules.py port.conf
       - name: Decoder and assembler agree (TLCS-900/H)
         run: python3 tools/ngpref/test_asm.py

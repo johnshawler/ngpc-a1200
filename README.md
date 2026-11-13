@@ -60,8 +60,8 @@ once, on the host, and prove the translation against an interpreter tick by tick
 A1200 (FS-UAE, cycle-exact 68EC020, 2 MB chip RAM, no fast RAM), compiles and runs the host test, and checks:
 
 - `late=0` and `worst_pct` at most 80, unless `CLASS=perpixel` and the user approved that class in `APPROVALS`;
-- the brief's rules `tools/check_rules.py` can see: an approved plan (`FEASIBILITY.md`), no run-time interpreter of
-  the original CPU, no float or double, the kit unchanged (nothing is built without the approved plan);
+- the brief's rules `tools/check_rules.py` can see: a plan (`FEASIBILITY.md`), no run-time interpreter of the
+  original CPU, no float or double, the kit unchanged (nothing is built without the plan);
 - the tick count;
 - that the game-state checksum equals the host test's.
 
