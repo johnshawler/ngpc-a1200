@@ -1,5 +1,6 @@
 #!/bin/bash
 # Usage: tools/prof_ngpc.sh <outdir> <ticks> [seconds] [fs-uae options, e.g. --fast_memory=4096]
+# PROF_CFLAGS=-DNGP_PROF_HEAVY=<colour clocks>: keep only the samples of ticks whose logic took longer than that
 # Where the time goes on the emulated Amiga: builds the port with the 1 kHz sampling profiler (src/prof68k.s,
 # -DNGP_PROF), runs "<name>_prof bench <ticks>" with <outdir> as its disk, and prints the functions that got
 # the most samples. Translated game code is F_<address>; the display is k2ge_* and c2p*.
@@ -10,7 +11,7 @@ OUT="$1"; N="$2"; SECS="${3:-600}"; shift 3 2>/dev/null || shift $#
 EXE=${NAME}_prof
 # the same build as tools/build.sh, linked with a map: static functions have no symbol in the executable, the map
 # says at least which object file a sample fell in
-docker run --rm -v "$PWD":/work -w /work -e CFLAGS="$CFLAGS -DNGP_PROF" amigadev/crosstools:m68k-amigaos bash -c '
+docker run --rm -v "$PWD":/work -w /work -e CFLAGS="$CFLAGS -DNGP_PROF $PROF_CFLAGS" amigadev/crosstools:m68k-amigaos bash -c '
 set -e; OBJS=""; rm -rf dist/obj_prof; mkdir -p dist/obj_prof
 for f in '"$SOURCES src/prof68k.s"'; do
   o=dist/obj_prof/$(echo "$f" | tr "/." "__").o

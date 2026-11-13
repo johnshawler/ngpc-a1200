@@ -176,8 +176,14 @@ int main(int argc, char **argv)
         while (acc >= hz && !(bench && ticks >= bench)) {       /* bench mode stops at exactly N ticks */
             acc -= hz;
             t1 = sys_now();
+#ifdef NGP_PROF_HEAVY                   /* tools/prof_ngpc.sh: only the samples of the heaviest ticks are kept */
+            { ULONG c0 = prof_cnt;
+#endif
             game_tick(bench ? game_bench_input(ticks) : read_input());
             t1 = sys_now() - t1; logic_total += t1; if (t1 > logic_worst) logic_worst = t1;
+#ifdef NGP_PROF_HEAVY
+            if (t1 < NGP_PROF_HEAVY) prof_cnt = c0; }
+#endif
             ticks++;
         }
         game_draw();

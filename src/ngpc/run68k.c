@@ -3,6 +3,7 @@
  * (the op_ functions of gen_ops.c, waits, BIOS calls, memory other than RAM and the cartridge). Nothing here interprets
  * the game's code: what the traces never reached stops the game (ngp_fatal reason 2). */
 #include <stddef.h>
+#include <string.h>
 #include "ngp.h"
 #define CPU900_EXTERN
 #include "cpu900.h"
@@ -85,8 +86,21 @@ uint32_t asm_ldir(uint32_t dst, uint32_t src, uint32_t n, int32_t step)
                         ngp_vid_gen++; ngp_dirty.chr[(o - 0x2000) >> 4] = 1; ngp_dirty.any = 1;
                     }
                     o += 16; s += 16;
+                } else if (!(o & 3) && end - o >= 4 && *(const uint32_t *)(const void *)(ngp_vid + o) == *(const uint32_t *)(const void *)s) {
+                    o += 4; s += 4;             /* 4 bytes the same already (a sprite table copied each frame) */
                 } else { ngp_vidw(o, *s); o++; s++; }
             }
+            return bytes;
+        }
+    }
+    if (step > 0 && bytes <= 0x3000u && dst - 0x4000u <= 0x3000u - bytes) {    /* into work RAM, which has no side effects */
+        const uint8_t *s = src - 0x200000u <= 0x200000u - bytes ? ngp_rom + (src - 0x200000)
+                         : src - 0x4000u <= 0x4000u - bytes ? ngp_ram + (src - 0x4000) : 0;
+        if (s) {
+            uint8_t *d = ngp_ram + (dst - 0x4000);
+            if (d <= s || d >= s + bytes) { memmove(d, s, bytes); return bytes; }   /* what LDIR does when they do not overlap that way */
+            if (size == 1) for (i = 0; i < bytes; i++) d[i] = s[i];                 /* dst ahead of src: LDIR repeats the start */
+            else for (i = 0; i < bytes; i += 2) { uint8_t a0 = s[i], a1 = s[i + 1]; d[i] = a0; d[i + 1] = a1; }   /* LDIRW: a word at a time */
             return bytes;
         }
     }
