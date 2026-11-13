@@ -131,6 +131,16 @@ sound processor's frame of time, and the interrupts it raised.
   bench, 740 with an idle, a tapping and a random ten-minute script, 976 after 26 rounds of exploration, when 1 in
   30 random ten-minute scripts still found something new, late in the run. What is still missing stops the game,
   so keep exploring until the scripts stop finding anything.
+- **The display on the hardware** (`src/ngpc/hwdisp.c`, the brief's route; check it on the host with
+  `tools/hwdisp_test.c`, which models the kit's display and compares every picture with `k2ge.c`'s): the back plane
+  is a hardware-scrolled playfield of 16 x 16 tiles (world x = W0 + the summed scroll steps; buffer rows 256-407 repeat
+  rows 0-151, so vertical wrap is free); columns outside the window are cleared to black with `disp_clear` (black
+  tiles cost too much when the game jumps its scroll a whole screen); the front plane and the sprites over it are five
+  64-pixel sprites in three strips, one of them 3 colours (the right strip measured best for Neo Turf Masters); small
+  objects are `disp_bob`. Things the game does that this had to handle: wipes through the window register (mark only
+  the cells whose inside/outside changed; a blank window costs only a palette change), a BIOS call that writes the
+  font into character RAM (it must mark the characters dirty, `ngp.c`), the front plane scrolling 1 pixel every 12
+  ticks on the title (a whole front-layer redraw each time).
 - **Instructions with no inline form** (DIV, CPIR, EX with memory, PUSH/POP SR, LDF, RETI, calls and jumps
   through registers in the C back end) are one C function each, `op_<address>()` in `gen_ops.c`, written by
   `recomp900.op_body` from the decoded instruction with `cpu900.h`'s primitives and called by both back ends.

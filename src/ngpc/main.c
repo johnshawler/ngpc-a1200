@@ -4,10 +4,10 @@
  *   game             play; Escape quits
  *   game bench N     play N logic ticks from scripted input, quit, write bench.txt (the proof of speed)
  *
- * The display shows the Neo Geo Pocket's 160 x 152 picture at its own size in the middle of a black 320 x 256
- * screen. It draws the picture from the K2GE's memory (k2ge_frame_cached: the 256 palette entries are the 256 pens of
- * an 8-plane screen) and converts it with the kit's chunky-to-planar routine, row by row. It draws a new picture only
- * when the game changed the K2GE's memory; a change of colours alone only reloads the palette.
+ * The display shows the Neo Geo Pocket's 160 x 152 picture at its own size in the middle of a black screen, on the
+ * A1200's hardware (FEASIBILITY.md, src/ngpc/hwdisp.c): the course is a hardware-scrolled playfield of tiles, the
+ * front plane and the sprites in front of it are five hardware sprites, small objects are blitter objects. Only what
+ * the game changed is drawn; nothing is converted.
  * Sound: the streams tools/sndrec_ngpc.c recorded from the game's own sound program (dist/sound.bin), played on
  * Paula at every vertical blank (src/ngpc/sound_ngp.c). Without sound.bin the game is silent.
  */
@@ -30,12 +30,7 @@
 #undef TICKS_PER_SECOND                 /* <proto/dos.h> has its own */
 #define TICKS_PER_SECOND 60             /* the Neo Geo Pocket shows 60 frames a second: 6 ticks every 5 frames */
 
-void c2p1x1_8_c5_gen_init(int cx __asm("d0"), int cy __asm("d1"), int offx __asm("d2"), int offy __asm("d3"),
-                          int rowlen __asm("d4"), int bplsize __asm("d5"));
-void c2p1x1_8_c5_gen(void *chunky __asm("a0"), void *planes __asm("a1"));
-
-#define PIC_X 80                        /* where the picture sits on the 320 x 256 screen: in the middle */
-#define PIC_Y 52
+#include "hwdisp.h"
 
 /* ---- the game ------------------------------------------------------------------------------ */
 #ifdef NGP_PROF                         /* tools/prof_ngpc.sh: a 1 kHz sampling profiler (src/prof68k.s) */
@@ -43,22 +38,25 @@ extern void prof_install(void), prof_remove(void); extern ULONG prof_buf[], prof
 extern void co_resume(void);
 #endif
 
-static const DispCfg display = { .planes = 8, .scroll = 0, .fetch = 3, .view_h = 256, .buf_h = 256,
-                                 .level_w = 0, .buffers = 2, .double_y = 0, .sprite_w = 16, .sprite_bank = 1 };
-static UBYTE *chunky;                   /* 160 x 152 palette entries */
+static const DispCfg display = { .planes = HW_PLANES, .scroll = 1, .fetch = 1, .view_h = HW_VIEW_H, .buf_h = HW_BUF_H,
+                                 .level_w = HW_LEVEL_W, .buffers = 3, .double_y = 0, .sprite_w = 64, .sprite_bank = HW_SPR_BANK };
 static ULONG palette[256];
-static ULONG chunky_gen = ~0UL;          /* ngp_vid_gen when chunky was drawn */
-static struct { UBYTE *buf; ULONG gen; ULONG rows[K2GE_H_LINES]; } shown[2];   /* what each screen buffer holds:
-                                           the picture, and k2ge_line_gen of each row when it was converted */
-static ULONG *rgb_of;                   /* 4,096 entries: a K2GE colour (0x0BGR) as 0x00RRGGBB */
-ULONG pictures_drawn, pictures_converted, draw_cck, convert_cck;     /* how many, and the colour clocks they took */
+static ULONG draw_total, draw_worst, hw_tiles, hw_cells, hw_behind;   /* the display's cost and work, for bench.txt */
+
+/* what src/ngpc/hwdisp.c asks of the display: the kit's calls */
+void hw_tile(int32_t x, int32_t y, const uint16_t *t) { disp_tile(x, y, (const UWORD *)t); }
+void hw_clear(int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    disp_clear(disp_front, x, y, (UWORD)w, (UWORD)h); disp_clear(disp_back, x, y, (UWORD)w, (UWORD)h);
+    disp_clear(disp_clean, x, y, (UWORD)w, (UWORD)h);
+}
+void hw_bob(int32_t x, int32_t y, const uint16_t *img, const uint16_t *msk, int ww, int h) { disp_bob(x, y, (const UWORD *)img, (const UWORD *)msk, (UWORD)ww, (UWORD)h); }
+void hw_sprite(int n, uint16_t *blk, int x, int y, int h, int att) { disp_sprite((UWORD)n, (UWORD *)blk, (WORD)x, (WORD)y, (UWORD)h, (UWORD)att); }
+void hw_sprite_off(int n) { disp_sprite_off((UWORD)n); }
+void hw_scroll(int32_t x, int32_t y) { disp_scroll(x, y); }
+void hw_palette(const uint32_t *rgb, int first, int count) { disp_palette((const ULONG *)rgb, (UWORD)first, (UWORD)count); }
+void *hw_chip(uint32_t bytes) { return sys_alloc(bytes, MEMF_CHIP | MEMF_CLEAR); }   /* before sys_take(): hwdisp_init() */
 static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the logic's own cost */
-/* A pass whose ticks took more than this much skips drawing a new picture (at most SKIP_MAX passes in a row): the kit's
-   loop gives a pass at most 8 frames of game time, and heavy ticks plus a picture went over that at scene changes */
-#define SKIP_LOGIC (2 * 71051UL)
-#define SKIP_MAX 8
-static ULONG logic_seen;
-static int skipped_in_row;
 
 /* The cartridge: rom.bin as it is, or rom.lzma, the packed copy a floppy holds (tools/make_adf_ngpc.sh). Fast RAM if
    there is any. */
@@ -96,23 +94,17 @@ static int game_load(void)
     UBYTE *rom = load_cartridge(&romlen);
     UBYTE *font = sys_load("font.bin", MEMF_ANY, &fontlen);     /* the BIOS's character set, if the user has it */
     if (!rom) { printf("cannot load rom.bin or rom.lzma: file missing, or not enough memory for %s\n", "the cartridge"); return 0; }
-    chunky = sys_alloc(K2GE_W * K2GE_H_LINES, MEMF_ANY | MEMF_CLEAR);
-    rgb_of = sys_alloc(4096 * 4, MEMF_ANY);
-    if (!chunky || !rgb_of || !sound_load()) return 0;
-    {   ULONG c;
-        for (c = 0; c < 4096; c++) rgb_of[c] = ((c & 15) * 17 << 16) | (((c >> 4) & 15) * 17 << 8) | ((c >> 8) & 15) * 17;
-    }
+    if (!hwdisp_init()) { printf("not enough chip RAM for the display\n"); return 0; }
+    if (!sound_load()) return 0;
     game_init(rom, romlen, (font && fontlen == 0x800) ? font : 0);
     return 1;
 }
 
 static void game_start(void)
 {
-    c2p1x1_8_c5_gen_init(K2GE_W, 1, 0, 0, disp_row, disp_plane);        /* one row of the picture at a time */
 #ifdef NGP_PROF
     prof_install();
 #endif
-    ngp_pal_dirty = 1;
     sound_start();
 }
 
@@ -135,35 +127,13 @@ static UWORD read_input(void)
 
 static void game_draw(void)
 {
-    int i, y, skip;
-    if (ngp_pal_dirty) {                        /* the K2GE's 256 palette entries are the 256 pens */
-        UBYTE neg = ngp_vid[0x12] & 0x80;
-        ngp_pal_dirty = 0;
-        for (i = 0; i < 256; i++) {
-            UWORD c = (UWORD)(ngp_vid[0x200 + i * 2] | ngp_vid[0x201 + i * 2] << 8);
-            if (neg) c = ~c;
-            palette[i] = rgb_of[c & 0xfff];
-        }
-        palette[0] = 0;                         /* pen 0 is never in the picture (sprite colour 0 is see-through): the border */
-        disp_palette(palette, 0, 256);
-    }
-    skip = chunky_gen != ngp_vid_gen && logic_total - logic_seen > SKIP_LOGIC && skipped_in_row < SKIP_MAX;
-    logic_seen = logic_total;
-    skipped_in_row = skip ? skipped_in_row + 1 : 0;
-    if (chunky_gen != ngp_vid_gen && !skip) {   /* the game changed the picture (the next pass draws it if skipped) */
-        ULONG t0 = sys_now();
-        k2ge_frame_cached(ngp_vid, &ngp_dirty, chunky);
-        chunky_gen = ngp_vid_gen; pictures_drawn++; draw_cck += sys_now() - t0;
-    }
-    for (i = 0; i < 2 && shown[i].buf && shown[i].buf != disp_back; i++) ;
-    if (i == 2) i = 0;
-    if (shown[i].buf != disp_back || shown[i].gen != chunky_gen) {    /* this buffer shows an older picture */
-        UBYTE *dst = disp_back + PIC_Y * disp_row + PIC_X / 8; ULONG t0 = sys_now();
-        int fresh = shown[i].buf != disp_back;
-        for (y = 0; y < K2GE_H_LINES; y++, dst += disp_row)     /* only the rows written since this buffer got them */
-            if (fresh || shown[i].rows[y] != k2ge_line_gen[y]) { c2p1x1_8_c5_gen(chunky + y * K2GE_W, dst); shown[i].rows[y] = k2ge_line_gen[y]; }
-        shown[i].buf = disp_back; shown[i].gen = chunky_gen; pictures_converted++; convert_cck += sys_now() - t0;
-    }
+    ULONG t0 = sys_now(), t;
+    disp_begin();                               /* erase the objects of two frames ago */
+    hwdisp_frame(ngp_vid, &ngp_dirty);          /* tiles, front layer, objects, sprites, scroll, colours */
+    t = sys_now() - t0;
+    draw_total += t; if (t > draw_worst) draw_worst = t;
+    hw_tiles += hwdisp_last.tiles; hw_cells += hwdisp_last.cells;
+    if (hwdisp_last.tiles_left || hwdisp_last.cells_left) hw_behind++;
 }
 
 /* ---- the loop: keep as it is ------------------------------------------------------------------ */
@@ -175,12 +145,11 @@ int main(int argc, char **argv)
     char text[240];
 
     if (!game_load() || !disp_open(&display)) { disp_close(); sys_free_all(); return 20; }
-    if (disp_plane != 320 * 256 / 8) { printf("the display is not the one the C2P routine was assembled for\n"); disp_close(); sys_free_all(); return 20; }
     sys_force_pal = 1;                                          /* NTSC machine: run the picture at 50 Hz */
     if (!sys_take()) { disp_close(); sys_free_all(); return 20; }
     sys_vbl_hook = vbl;                                         /* keys and sound at every vertical blank */
     hz = sys_is_pal ? 50 : 60;
-    disp_palette(palette, 0, 256);
+    disp_palette(palette, 0, 256);                              /* black; hwdisp_frame() sets the colours */
     disp_on();
     game_start();
     perf_reset();
@@ -217,10 +186,10 @@ int main(int argc, char **argv)
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
     if (bench) {
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
-        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu pics=%lu/%lu draw_cck=%lu conv_cck=%lu",
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu draw_cck=%lu max=%lu tiles=%lu cells=%lu behind=%lu",
                 (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
-                (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)pictures_drawn, (unsigned long)pictures_converted,
-                (unsigned long)(pictures_drawn ? draw_cck / pictures_drawn : 0), (unsigned long)(pictures_converted ? convert_cck / pictures_converted : 0));
+                (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)(frames ? draw_total / frames : 0),
+                (unsigned long)draw_worst, (unsigned long)hw_tiles, (unsigned long)hw_cells, (unsigned long)hw_behind);
         perf_note(text);
         perf_save("bench.txt");
 #ifdef SOUND_TRACE

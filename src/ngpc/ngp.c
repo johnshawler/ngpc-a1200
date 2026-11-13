@@ -225,7 +225,7 @@ void ngp_bios_call(unsigned n)
             uint8_t c = ngp_font ? ngp_font[i] : (uint8_t)((i & 7) == 0 || (i & 7) == 7 ? 0xff : 0x81);
             unsigned w = 0;
             for (j = 0; j < 8; j++, c <<= 1) w = (w << 2) | ((c & 0x80) ? (ra3 & 3u) : (unsigned)(ra3 >> 4) & 3u);
-            ngp_vid[0x2000 + i * 2] = (uint8_t)w; ngp_vid[0x2001 + i * 2] = (uint8_t)(w >> 8);
+            ngp_vidw(0x2000 + i * 2, (uint8_t)w); ngp_vidw(0x2001 + i * 2, (uint8_t)(w >> 8));   /* marked: the display redraws them */
         }
         break;
     case 6: case 7: case 8: case 9: case 11: case 13: case 16: cpu.bank[3][0] &= ~0xffu; break;   /* flash, alarm, serial init: "done" */
