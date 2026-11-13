@@ -101,14 +101,16 @@ Under 80. The swing scene: logic 38 + the golfer redrawn in the front layer when
 x 0.3 = 33, *estimate*) + 1 = 72, under 80 only if the golfer changes at most once a frame; more cells than that are
 spread over the next frames (the golfer then shows a frame late).
 
-The logic figure is with 4 MB fast RAM. With chip RAM only it is higher and not measured. See decision 3.
+The logic figure is with 4 MB fast RAM, the machine this port requires (decision 3).
 
 ## 6. Chip RAM (Step 2)
 
 Display buffers: 3 x 6 x (64 x 408 + 4096 / 8 + 64) = 480,384 bytes (469 KB). Front-layer sprites: 5 x 2 x 154 x 16
 = 24 KB. Tables and scratch: under 16 KB. Program now: 518 KB (shrinks when the interpreter goes). **The cartridge:
 1,544 KB of its 2 MB are used, and the game reads it at run time.** Together about 2.5 MB: over the brief's 1.5 MB and
-over the whole 2 MB of a stock A1200. See decision 3.
+over the whole 2 MB of a stock A1200. Decided (decision 3): the port requires 4 MB fast RAM. The cartridge, the
+program and its tables go in fast RAM (`MEMF_ANY`); chip RAM holds only the display buffers, sprites, the scratch
+tile and the sound: about 520 KB.
 
 ## 7. What is cut, in the brief's order
 
@@ -129,11 +131,11 @@ over the whole 2 MB of a stock A1200. See decision 3.
 2. **The sprites go to the front layer**, so the golfer and the HUD are limited to one 15-colour bank (item 2 of the
    cuts). The other way, a dual playfield or a narrower display window, needs display set-up the kit does not have:
    writing it is under "Never do these" and is not in this plan.
-3. **Memory.** The game cannot fit a stock A1200 (section 6). Either (a) the port requires 4 MB fast RAM for the
-   cartridge and the program, benched with `tools/port.sh fast` and stated in the report; or (b) milestone 4 measures
-   which cartridge bytes the game reads as data and keeps only those (the translated code no longer needs its own
-   bytes) and we see whether it fits; if not, (a). Either departs from the brief's stock target and needs your word.
+3. **Memory: decided by the user, (a).** The game cannot fit a stock A1200 (section 6), so the port requires 4 MB
+   fast RAM for the cartridge and the program. This departs from the brief's stock target with the user's word. The
+   gates are judged on `tools/port.sh fast` (FS-UAE A1200, cycle-exact, plus 4 MB fast RAM), and the report says so;
+   the stock bench is still run and reported as it comes out (the program cannot load the cartridge there).
 4. **Order of work** (`PIPELINE.md`): first the interpreter out (rules), then milestones 5 (course on screen), 6
    (scrolling, `late=0` over the bench), 7 (front layer and objects), 8 (checksum), 9 (sound), 10 (3,000+ ticks).
 
-To approve: `tools/approve.sh plan`, then commit `APPROVALS`. Answer decision 3 with it.
+To approve: `tools/approve.sh plan`, then commit `APPROVALS`.
