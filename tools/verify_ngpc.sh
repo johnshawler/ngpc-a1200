@@ -1,19 +1,21 @@
 #!/bin/bash
-# Usage: tools/verify_ngpc.sh [ticks]
+# Usage: tools/verify_ngpc.sh [ticks] [input script]
 # The proof of the translation. Builds the host test twice from the same machine and frame model: once with the
 # code tools/recomp900.py generated, once with the interpreter. Both write the machine after every tick (RAM, the
 # K2GE, the ports, the registers: host_test.c); the two files must be equal byte for byte. Prints the first tick
-# and the place that differ, if any.
+# and the place that differ, if any. With an input script (tools/flow_ngpc/<game>_*.in, tools/ngpref's format) both
+# play it instead of the bench input.
 set -e
 cd "$(dirname "$0")/.."
 N=${1:-3000}
+IN=""; [ -n "$2" ] && IN="-i $(realpath "$2")"
 OUT=${TMPDIR:-/tmp}/verify_ngpc.$$
 mkdir -p "$OUT"
 COMMON="src/ngpc/host_test.c src/ngpc/logic.c src/ngpc/ngp.c src/ngpc/k2ge.c src/coro_host.c"
 cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc $COMMON src/ngpc/run_c.c src/ngpc/gen_dispatch.c src/ngpc/gen_[0-9]*.c -o "$OUT/translated"
 cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc $COMMON src/ngpc/run_interp.c -o "$OUT/interpreted"
-"$OUT/translated" "$N" -r "$OUT/t.bin" | tail -1
-"$OUT/interpreted" "$N" -r "$OUT/i.bin" | tail -1
+"$OUT/translated" "$N" $IN -r "$OUT/t.bin" | tail -1
+"$OUT/interpreted" "$N" $IN -r "$OUT/i.bin" | tail -1
 if cmp -s "$OUT/t.bin" "$OUT/i.bin"; then
   echo "verify: translation = interpreter after every one of $N ticks ($(stat -c %s "$OUT/t.bin") bytes compared)"
   rm -rf "$OUT"; exit 0

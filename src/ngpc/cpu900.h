@@ -90,7 +90,8 @@ CPU900_UNUSED static uint32_t cpu_rd(int size, uint32_t a)
 {
     uint32_t v = mem_r8(a & 0xffffff);
     if (size > 1) v |= (uint32_t)mem_r8((a + 1) & 0xffffff) << 8;
-    if (size > 2) v |= (uint32_t)mem_r8((a + 2) & 0xffffff) << 16 | (uint32_t)mem_r8((a + 3) & 0xffffff) << 24;
+    if (size > 2) v |= (uint32_t)mem_r8((a + 2) & 0xffffff) << 16;
+    if (size > 3) v |= (uint32_t)mem_r8((a + 3) & 0xffffff) << 24;   /* 3: a 24-bit address, not the next opcode too */
     return v;
 }
 CPU900_UNUSED static void cpu_wr(int size, uint32_t a, uint32_t v)

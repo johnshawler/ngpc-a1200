@@ -22,11 +22,14 @@ static uint32_t co_stack[65536 / 4];            /* the main thread's C stack */
 uint32_t logic_trace[LOGIC_TRACE]; unsigned logic_ntrace;
 #endif
 
+void (*logic_irq_hook)(int idx, uint32_t to);   /* host tools: every interrupt taken, and its handler */
+
 static void deliver(void)                       /* run the handlers of the interrupts the CPU would take now */
 {
     int idx;
     while (!ngp_fatal_why && (idx = ngp_irq_next()) >= 0) {
         uint32_t ret = cpu.pc, to = ngp_irq_enter(idx);
+        if (logic_irq_hook) logic_irq_hook(idx, to);
         if (run_call(to) != ret) { ngp_fatal(to, 4); return; }
         cpu.pc = ret;
     }

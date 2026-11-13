@@ -5,8 +5,9 @@
 #   assets/rom.bin, dist/rom.bin     the cartridge as the game reads it (the Amiga program loads it at start)
 #   assets/font.bin, dist/font.bin   the BIOS's character set, when original/bios.ngp is there (system call 5)
 #   src/ngpc/gen_*                   the game's TLCS-900/H code translated to C by tools/recomp900.py
-#   assets/sound.bin, dist/sound.bin the music and sound effects the bench input reaches, recorded from the game's
-#                                    own sound program (tools/sndrec_ngpc.c; SOUND_TICKS, default TICKS)
+#   assets/sound.bin, dist/sound.bin the music and sound effects the bench input and the input scripts
+#                                    (tools/flow_ngpc/$GAME_*.in) reach, recorded from the game's own sound program
+#                                    (tools/sndrec_ngpc.c; SOUND_TICKS, default TICKS, for the bench)
 # The flow files tools/flow_ngpc/$GAME_*.txt (made by tools/ngpref -c) seed the translation.
 set -e
 cd "$(dirname "$0")/.."
@@ -49,6 +50,6 @@ PY
 SR=$(mktemp /tmp/sndrec.XXXXXX)
 cc -O2 -fno-strict-aliasing -Isrc/ngpc -Isrc tools/sndrec_ngpc.c src/ngpc/psg.c src/ngpc/sndplay.c src/ngpc/logic.c src/ngpc/ngp.c \
    src/ngpc/k2ge.c src/ngpc/run_c.c src/coro_host.c $GEN -o "$SR"
-"$SR" assets/rom.bin "${SOUND_TICKS:-$TICKS}" assets/sound.bin
+"$SR" assets/rom.bin "${SOUND_TICKS:-$TICKS}" assets/sound.bin - tools/flow_ngpc/"$GAME"_*.in
 rm -f "$SR"
 cp assets/sound.bin dist/sound.bin

@@ -1,6 +1,6 @@
 /* sndrec_ngpc.c - records the game's music and sound effects from its own sound program, on the host.
  *
- * Usage: sndrec_ngpc rom.bin ticks out.bin [compare.txt]
+ * Usage: sndrec_ngpc rom.bin ticks out.bin [compare.txt|-] [script.in ...]
  *
  * The Amiga does not run the Z80: a model of the SNK driver answers the game (src/ngpc/ngp.c). What the driver
  * plays depends on the command byte the game sends and on what the game copied into the sound processor's 4 KB
@@ -13,7 +13,8 @@
  *  3. out.bin holds the streams (format in src/ngpc/sndplay.h), big-endian, for src/ngpc/sndplay.c.
  * A command byte with no audible output stops everything (command 0x01 of Neo Turf Masters); 0xFF restarts.
  * With compare.txt the tool also writes, per 50 Hz frame of the bench, the state the Amiga's player would
- * produce, for tools/check_music_ngpc.sh to compare with the real driver's.
+ * produce, for tools/check_music_ngpc.sh to compare with the real driver's. Input scripts after it (tools/ngpref's
+ * format: tools/flow_ngpc/<game>_*.in) are played too, each from power-on, for the commands of the scenes they reach.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,7 @@
 #include "logic.h"
 #include "psg.h"
 #include "sndplay.h"
+#include "script_input.h"
 
 /* ---- 1. the keys the game sends ---- */
 #define MAXK 512
@@ -30,12 +32,13 @@ static int nkeys;
 static struct { unsigned tick; uint32_t key; uint8_t cmd; } events[8192];
 static int nevents;
 static unsigned cur_tick;
+static int bench_events = 1;                    /* the compare file replays the bench's commands only */
 
 static void on_cmd(uint8_t cmd)
 {
     uint32_t k = sound_key(ngp_ram + 0x3000);
     int i;
-    if (nevents < 8192) { events[nevents].tick = cur_tick; events[nevents].key = k; events[nevents].cmd = cmd; nevents++; }
+    if (bench_events && nevents < 8192) { events[nevents].tick = cur_tick; events[nevents].key = k; events[nevents].cmd = cmd; nevents++; }
     if (cmd == 0xff) return;
     for (i = 0; i < nkeys; i++) if (keys[i].key == k && keys[i].cmd == cmd) return;
     if (nkeys == MAXK) { fprintf(stderr, "sndrec: more than %d keys\n", MAXK); return; }
@@ -228,7 +231,7 @@ int main(int argc, char **argv)
     unsigned n, t;
     int k, ns = 0;
     uint32_t off;
-    if (argc < 4) { fprintf(stderr, "usage: sndrec_ngpc rom.bin ticks out.bin [compare.txt]\n"); return 2; }
+    if (argc < 4) { fprintf(stderr, "usage: sndrec_ngpc rom.bin ticks out.bin [compare.txt|-] [script.in ...]\n"); return 2; }
     f = fopen(argv[1], "rb");
     if (!f) { perror(argv[1]); return 1; }
     romlen = (long)fread(rom, 1, sizeof rom, f); fclose(f);
@@ -236,6 +239,19 @@ int main(int argc, char **argv)
     game_init(rom, (uint32_t)romlen, 0);
     ngp_snd_hook = on_cmd;
     for (t = 0; t < n; t++) { cur_tick = t; game_tick(game_bench_input(t)); }
+    printf("sndrec: the bench: %d commands, %d keys\n", nevents, nkeys);
+    bench_events = 0;
+    {   int a;
+        for (a = 5; a < argc; a++) {            /* the scripts: from power-on, until their last press and 10 s more */
+            unsigned last = 36000, k0 = (unsigned)nkeys, i;
+            script_n = 0;
+            if (!script_load(argv[a])) { fprintf(stderr, "sndrec: cannot read %s\n", argv[a]); return 1; }
+            for (i = 0; i < script_n; i++) if (script_lines[i].last + 600 > last) last = script_lines[i].last + 600;
+            game_init(rom, (uint32_t)romlen, 0);
+            for (t = 0; t < last && !ngp_fatal_why; t++) { cur_tick = t; game_tick(script_input(t)); }
+            printf("sndrec: %s: %u ticks%s, %u new keys\n", argv[a], t, ngp_fatal_why ? " (stopped: untranslated code)" : "", (unsigned)nkeys - k0);
+        }
+    }
     ngp_snd_hook = 0;
     printf("sndrec: %d commands sent in %u ticks, %d different (4 KB, command) keys\n", nevents, n, nkeys);
     for (k = 0; k < nkeys; k++) {
@@ -277,7 +293,7 @@ int main(int argc, char **argv)
     for (k = 0; k < ns; k++) { static const uint8_t z[4]; fwrite(streams[k].data, 1, streams[k].len, f); fwrite(z, 1, ((streams[k].len + 3) & ~3u) - streams[k].len, f); }
     fclose(f);
     printf("sndrec: %d streams, %u bytes in %s\n", ns, (unsigned)off, argv[3]);
-    if (argc > 4) {                             /* what the player makes of the bench, 50 times a second */
+    if (argc > 4 && strcmp(argv[4], "-")) {    /* what the player makes of the bench, 50 times a second */
         SoundPlayer pl;
         FILE *c = fopen(argv[4], "w");
         uint8_t *all = malloc(off);

@@ -9,7 +9,9 @@
 #include "cpu900.h"
 #include "logic.h"
 #include "run.h"
-#include "gen_waits.h"                          /* gen_waits[]: { address of the branch back, 1 = frame wait, 2 = poll } */
+#include "gen_waits.h"
+#include <stdio.h>
+#include <stdlib.h>                          /* gen_waits[]: { address of the branch back, 1 = frame wait, 2 = poll } */
 
 static uint8_t site[0x400000];                  /* per cartridge address: kind of wait at that branch */
 static int sites_ready;
@@ -19,6 +21,18 @@ static uint8_t *site_of(uint32_t pc)
     if (pc - 0x200000u < 0x200000u) return &site[pc - 0x200000];
     if (pc - 0x800000u < 0x200000u) return &site[pc - 0x600000];
     return 0;
+}
+
+/* Host tools (host_test -c): the flow file of what runs, in tools/ngpref's format, so that the translator learns what
+   the port itself reaches with an input script: E executed, I and C targets of jumps and calls through registers. */
+FILE *interp_flow;
+static uint8_t *flow_seen;
+static void flow_pair(char kind, uint32_t to, uint32_t from)
+{
+    static uint32_t pairs[65536][2]; static int npairs; int i;
+    for (i = 0; i < npairs; i++) if (pairs[i][0] == to && pairs[i][1] == from) return;
+    if (npairs < 65536) { pairs[npairs][0] = to; pairs[npairs][1] = from; npairs++; }
+    fprintf(interp_flow, "%c %06x %06x\n", kind, (unsigned)to, (unsigned)from);
 }
 
 uint32_t run_call(uint32_t pc)
@@ -37,6 +51,10 @@ uint32_t run_call(uint32_t pc)
             depth--; cpu.pc = r; continue;
         }
         f = mem_r8(pc0);
+        if (interp_flow) {
+            if (!flow_seen) flow_seen = calloc(1 << 21, 1);
+            if (!(flow_seen[pc0 >> 3] & (1 << (pc0 & 7)))) { flow_seen[pc0 >> 3] |= (uint8_t)(1 << (pc0 & 7)); fprintf(interp_flow, "E %06x\n", (unsigned)pc0); }
+        }
         if (f == 0x05) { cpu.pc = pc0 + 1; ngp_wait(cpu.pc); continue; }                   /* HALT */
         if (f == 0xf9) { cpu.pc = pc0 + 1; ngp_bios_call(cpu.bank[3][0] >> 8 & 0xff); continue; }   /* SWI 1: system call */
         if (f >= 0xf8) { ngp_fatal(pc0, 1); return 0; }                                    /* other SWIs: not done */
@@ -48,6 +66,17 @@ uint32_t run_call(uint32_t pc)
         if (at > 0) { op = mem_r8(pc0 + (uint32_t)at); if (op >= 0xe0 && op <= 0xef) call = 1; else if (op >= 0xf0 && f == 0xb0) ret = 1; }
         sp0 = cpu.gpr[3];
         cpu_step(); ngp_cpu_steps++;
+        if (interp_flow) {                      /* as tools/ngpref: jumps and calls through registers, and where they went */
+            uint8_t s2 = mem_r8(pc0 + 1);
+            int fat = -1;
+            if (f >= 0xb0 && f <= 0xb7) fat = 1; else if (f >= 0xb8 && f <= 0xbf) fat = 2; else if (f == 0xf4 || f == 0xf5) fat = 2;
+            else if (f == 0xf3) fat = (s2 & 3) == 0 ? 2 : 4;
+            if (fat > 0) {
+                uint8_t fop = mem_r8(pc0 + (uint32_t)fat);
+                if (fop >= 0xd0 && fop <= 0xef && ((fop & 15) == 8 || cpu.pc != ((pc0 + (uint32_t)fat + 1) & 0xffffff)) && cpu.pc < 0xff0000)
+                    flow_pair(fop < 0xe0 ? 'I' : 'C', cpu.pc, pc0);
+            }
+        }
         if (cpu.bad) { ngp_fatal(pc0, 1); return 0; }
         if (call && cpu.gpr[3] == sp0 - 4) depth++;                                        /* taken */
         else if (ret && cpu.gpr[3] != sp0) { if (!depth) return cpu.pc; depth--; }
