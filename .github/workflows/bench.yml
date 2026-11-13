@@ -17,7 +17,7 @@ jobs:
         run: |
           cc -O2 -Wall -Wextra -Werror -o /tmp/ngpref tools/ngpref/ngpref.c src/ngpc/k2ge.c
           cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/ngp.c -o /tmp/ngp.o
-          for f in psg sndplay; do cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/$f.c -o /tmp/$f.o; done
+          for f in psg sndplay unlzma; do cc -O2 -Wall -Wextra -Werror -Isrc/ngpc -Isrc -c src/ngpc/$f.c -o /tmp/$f.o; done
   bench:
     runs-on: ubuntu-24.04
     timeout-minutes: 60

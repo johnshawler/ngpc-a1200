@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 . "${PORT_CONF:-./port.conf}"                # PORT_CONF=<file>: bench another description (e.g. port.ngpc.conf)
 OPT=""; OUT=bench.txt; SHOT=shot.png
 if [ "$1" = fast ]; then OPT="--fast_memory=4096"; OUT=bench_fast.txt; SHOT=shot_fast.png; fi
+# KICKSTART=<file>: boot a Kickstart ROM the user supplied (keep it in original/, never commit it) instead of the free
+# AROS ROM the brief measures with
+[ -n "$KICKSTART" ] && OPT="$OPT --kickstart_file=$(realpath "$KICKSTART")"
 mkdir -p dist
 rm -f "dist/$NAME" "$OUT" "$SHOT"
 CFLAGS="$CFLAGS" tools/build.sh "dist/$NAME" $SOURCES || { echo "FAIL: build"; exit 1; }

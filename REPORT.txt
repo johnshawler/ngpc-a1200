@@ -30,25 +30,31 @@ Cut from the original: the Z80 itself: its music and effects are recordings of t
 Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cannot load rom.bin: file missing, or not
                        enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
                        (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
-With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks):
-                       frames=1231 late=1922 worst_cck=1307802 avg_cck=137068 budget_cck=71051 worst_pct=1840 avg_pct=192 display_hz=50 shown_fps=19.5
+With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks, AROS ROM):
+                       frames=1228 late=1925 worst_cck=1307866 avg_cck=137450 budget_cck=71051 worst_pct=1840 avg_pct=193 display_hz=50 shown_fps=19.4
                        ticks=3600 checksum=ac36a76c game_speed=95%
-                       logic_cck=22751 max=451508 pics=285/472 draw_cck=182312 conv_cck=70968
-                       PASS (per-pixel game: 19.5 pictures a second, game time at 95% of the clock: it falls behind where
-                       a pass takes more than 8 frames; shown_fps counts passes: see the frame rate claim). With sound
-                       playing. A pass whose ticks took over 2 frames
-                       draws no new picture (at most 8 in a row); without that rule (and before block copies were
-                       one call): 15.1 and 83%.
+                       logic_cck=22748 max=452394 pics=286/471 draw_cck=182025 conv_cck=71065
+                       KICKSTART=original/kick31_a1200.rom tools/port.sh fast (Kickstart 3.1 40.68, supplied by the user):
+                       frames=1228 late=1927 worst_cck=1305193 avg_cck=137618 budget_cck=71051 worst_pct=1836 avg_pct=193 display_hz=50 shown_fps=19.4
+                       ticks=3600 checksum=ac36a76c game_speed=95%
+                       logic_cck=22728 max=451619 pics=287/473 draw_cck=181671 conv_cck=71175
+                       PASS on both (per-pixel game: 19.4 pictures a second, game time at 95% of the clock: it falls
+                       behind where a pass takes more than 8 frames; shown_fps counts passes: see the frame rate
+                       claim). With sound playing. A pass whose ticks took over 2 frames draws no new picture (at most
+                       8 in a row); without that rule (and before block copies were one call): 15.1 and 83%.
 Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
                        one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
                        the real sound program as the game sees it after every one of 3,600 ticks
                        (tools/check_sound_ngpc.sh), and the renderers equal the reference renderer after every tick
-                       (host_test -k). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
+                       (host_test -k). Over three input scripts of 36,000 ticks (tools/flow_ngpc/ntm_*.in: idle,
+                       taps, random presses) the translation's checksum equals the interpreter's after every tick, and
+                       the full machine is equal after every one of their first 12,000 ticks (tools/verify_ngpc.sh N
+                       script). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
                        where it sounds hold the same note and volume as the real sound program within 3 frames and one
                        volume step, 80-92% exactly for the tones (tools/check_music_ngpc.sh, 3,600 ticks).
 Frame rate claim:      With 4 MB fast RAM: logic at 60 ticks a second where a pass stays within 8 frames; over the whole
-                       bench game time runs at 95% of the clock. Pictures: the kit's shown_fps (19.5) counts passes,
-                       each of which shows the newest picture drawn so far; new pictures drawn: 285 in 3,153 vertical
+                       bench game time runs at 95% of the clock. Pictures: the kit's shown_fps (19.4) counts passes,
+                       each of which shows the newest picture drawn so far; new pictures drawn: 286 in 3,153 vertical
                        blanks (63.1 s), 4.5 a second. The game changes its picture in 823 of the 3,600 ticks
                        (host_test prints it), 13.7 a second at its 60 Hz: the Amiga shows about a third of its picture
                        changes, every change of colours (fades) and all of its game time but 5%. 50 Hz is not held
@@ -58,14 +64,19 @@ Frame rate claim:      With 4 MB fast RAM: logic at 60 ticks a second where a pa
                        single ticks run up to 17,000 main-CPU instructions and change 7,600 bytes of video memory
                        (up to 451,508 colour clocks, 6.4 frames, for one tick).
                        Cheapest upgrade likely to reach full game speed: not measured.
-Not done, not tested:  sound beyond the commands the bench sends; DAC samples; a display that holds 50 Hz; real A1200
-                       hardware; a Commodore Kickstart ROM; NTSC; a real Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two
-                       pictures of the intro, 0 of 24,320 pixels differ); play by a person (controls are wired,
-                       untested); scenes beyond the bench (title, menus, course intro, first hole): their code is not
-                       traced, so the port stops there with reason 2; the profiling build on runs longer than 900 ticks
-                       (it did not finish 3,600); CI (the images cannot be committed to this public repository).
-How to run:            put the cartridge image at original/ntm.ngc and, if you have it, the BIOS image at
-                       original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
+Not done, not tested:  sound beyond the commands the bench and the input scripts send; DAC samples; a display that
+                       holds 50 Hz; real A1200 hardware (Kickstart 3.1 was used in the emulator only); NTSC; a real
+                       Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two pictures of the
+                       intro, 0 of 24,320 pixels differ); play by a person (controls are wired, tested only by
+                       scripts); code no trace reached runs through the interpreter (976 functions are translated;
+                       random play on the host found new code about once in five hours); the profiling build on runs
+                       longer than 900 ticks (it did not finish 3,600); CI (the images cannot be committed to this
+                       public repository).
+How to run:            The floppy: tools/make_adf_ngpc.sh writes dist/ntm.adf (880 KB, it holds the cartridge: for the
+                       owner only). Boot it on an A1200 with 4 MB fast RAM and Kickstart 3.1; it loads for about a
+                       minute, unpacks for about a minute and starts the game.
+                       From a hard disk: put the cartridge image at original/ntm.ngc and, if you have it, the BIOS
+                       image at original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
                        dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a
                        Shell ("ntm bench 3600" for the proof run). Joystick in port 2: stick = pad, button 1 (fire) =
                        NGPC button 1 (A), button 2 = NGPC button 2 (B). Keys: cursor keys = pad, Z = button 1 (A),

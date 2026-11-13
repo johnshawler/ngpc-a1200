@@ -29,6 +29,8 @@ What a finished port still needs is in section 8: a faster display, somewhat fas
 | Sound | `src/ngpc/psg.{c,h}` (the T6W28's registers), `tools/sndrec_ngpc.c` (records the game's own sound program per command, host), `src/ngpc/sndplay.{c,h}` (plays and mixes the recordings, host and Amiga), `src/ngpc/sound_ngp.c` (Paula), `tools/psgtrace_ngpc.c` and `tools/check_music_ngpc.sh` (how close it is) | use; a game with another driver may need other rules in `sndplay.c` (section 7) |
 | Measuring on the Amiga | `tools/prof_ngpc.sh` (1 kHz profiler, names static functions too), `tools/long_bench.sh` | use as is |
 | Starting a port | `tools/new_port_ngpc.sh`, `tools/make_assets_ngpc.sh`, `port.ngpc.conf`, `skills/amiga-ngpc-port/SKILL.md` | run once / install once |
+| Coverage | `tools/explore_ngpc.sh` (random play on the host until nothing untranslated is reached), `src/ngpc/script_input.h`, `host_test -i script [-c flow]` | run until a round is clean |
+| A floppy | `tools/make_adf_ngpc.sh` (bootable 880 KB image), `src/ngpc/loader.c`, `src/ngpc/unlzma.c`, `tools/test_adf_ngpc.sh` | run for the user; never commit the image |
 | Per game | `tools/games/<game>.py`, `game_bench_input` in `src/ngpc/logic.c`, the flow files `tools/flow_ngpc/<game>_*.txt`, `original/README.md` | write new |
 | Checks of the tools themselves | `tools/ngpref/check_tables.py`, `tools/ngpref/test_asm.py`, `tools/ngpref/README.md` | run after changing the tables |
 
@@ -54,10 +56,12 @@ What a finished port still needs is in section 8: a faster display, somewhat fas
 5. **What does the game read from its sound processor?** `./ngpref ... -m` lists every instruction of the main
    CPU that touches the shared RAM or the ports 0xB8-0xBC. Neo Turf Masters reads two things: the answer byte and
    a tick counter (section 4). If a new game reads more, extend the model in `ngp.c` or give it its own.
-6. Trace with `-c tools/flow_ngpc/<game>_<scene>.txt` over every scene you can reach, then
-   `tools/make_assets_ngpc.sh`, `tools/verify_ngpc.sh <ticks>` (the translation must equal the interpreter after
-   every tick) and `tools/check_sound_ngpc.sh <ticks>` (the sound model must equal the real sound program as the
-   game sees it). Only then the Amiga.
+6. Trace with `-c tools/flow_ngpc/<game>_<scene>.txt` over every scene you can reach (keep each input script next
+   to its trace as `<game>_<scene>.in`; an empty one is the attract mode), then `tools/make_assets_ngpc.sh`,
+   `tools/explore_ngpc.sh` (random play until it finds no more untranslated code), `tools/verify_ngpc.sh <ticks>`
+   and `tools/verify_ngpc.sh <ticks> tools/flow_ngpc/<game>_<scene>.in` for each script (the translation must
+   equal the interpreter after every tick) and `tools/check_sound_ngpc.sh <ticks>` (the sound model must equal the
+   real sound program as the game sees it). Only then the Amiga.
 7. `tools/port.sh fast` (and `tools/port.sh` if the game fits a stock machine), then `tools/prof_ngpc.sh` to see
    where the time goes. `tools/long_bench.sh` runs a port that is still too slow for the referee's time limit.
 
@@ -112,9 +116,19 @@ sound processor's frame of time, and the interrupts it raised.
   scenes (`-s`: busy states stay under 102,485). If it does not, game time on the console is slower there and
   the frame model would need cycle budgets. Neo Turf Masters: at most 65% of a frame in the bench.
 - **Routines stored as pointers.** Games keep task lists and state machines as code addresses in RAM and call
-  through them. The translator only knows the targets the traces saw: trace every scene you can reach; a target
-  it does not know stops the port with reason 2 and the address (put it in `EXTRA_ENTRIES`, or trace that
-  scene). A jump table entry may point at the instruction right after the jump: the tracer logs those too.
+  through them. The translator only knows the targets the traces saw. On the host a target it does not know
+  stops the run with reason 2 and the address, so gaps show; on the Amiga the 68k back end runs such code through
+  the interpreter until it returns (`asm_interp` in `run68k.c`) and the program says at exit how often. A jump
+  table entry may point at the instruction right after the jump: the tracers log those too.
+- **Coverage is what makes a port playable.** The bench's trace was enough for the bench and nothing else: left
+  at the title, Neo Turf Masters reached untranslated code within a minute (its attract mode), and 8 of 8 random
+  ten-minute input scripts stopped. `tools/explore_ngpc.sh` plays seeded random scripts through the translation
+  on the host; each one that stops is replayed with the interpreter build (`host_test N -i script -c flow`: the
+  port's own frame model, so it traces exactly what the port reaches) and added to
+  `tools/flow_ngpc/<game>_explore.txt`, then it translates again. For Neo Turf Masters: 583 functions from the
+  bench, 740 with an idle, a tapping and a random ten-minute script, 976 after 26 rounds of exploration, when 1 in
+  30 random ten-minute scripts still found something new, late in the run. The interpreter fallback covers the
+  rest.
 - **Not modelled in the frame model yet**: interrupts of the main CPU's timers (so no raster effects), the
   blanking flag and raster position at `0x8010`/`0x8009` (they read 0), micro DMA.
 - The checksum covers the 16 KB of RAM, the K2GE's memory, the ports and the registers.
@@ -309,6 +323,21 @@ the whole logic. What it plays is recorded on the host instead and played back:
   `make_assets` again. Effects that depend on what the driver was doing (a song's tempo change, an effect that
   continues a melody) are played from a fresh driver. DAC samples (ports 0xA2/0xA3) are not played.
 
+**A floppy for the user** (`tools/make_adf_ngpc.sh [out.adf] [command]`). A 2 MB cartridge does not fit an 880 KB
+disk; LZMA packs Neo Turf Masters' to 486 KB, and with its 500 KB program packed too (to 131 KB, behind a 12 KB
+loader, `src/ngpc/loader.c`, that unpacks it in memory and loads it with `InternalLoadSeg`) the disk is 77% full.
+The cartridge is unpacked by the program itself (`src/ngpc/unlzma.c`, written for this template from the format's
+description and checked against Python's `lzma` on 13 streams). The disk boots straight into the game: Kickstart
+3.1, an A1200 with 4 MB fast RAM, about a minute to load from the floppy and 54 s to unpack. With the free AROS ROM
+the unpacking ran out of memory in one piece (2 MB): test floppies with a real Kickstart. `tools/test_adf_ngpc.sh
+<ticks>` makes an image that runs the bench, boots it with no hard disk and reads `bench.txt` back from the disk:
+Neo Turf Masters gives the host's checksum after 600 ticks. The image holds the user's cartridge: it goes to the
+user only. Unpacking was 103 s with the decoder's state in a struct; keeping it in locals (registers) halved that.
+
+**Kickstart.** The brief measures with the free AROS ROM. A Kickstart ROM the user supplies goes in `original/`
+(ignored by git) and is used with `KICKSTART=original/<file>.rom tools/port.sh fast` (or `tools/test_adf_ngpc.sh`).
+Neo Turf Masters on Kickstart 3.1 (40.68): the same checksum and the same bench numbers as on AROS within 0.2%.
+
 ## 8. Not done yet (do it when a game needs it; the tools say when)
 
 - **Speed of the logic.** The 68k back end still calls a routine for every access that is not work RAM, keeps
@@ -316,6 +345,9 @@ the whole logic. What it plays is recorded on the host instead and played back:
   steps `DIV`, `LDF`, `CPIR` and a few `PUSH`/`POP`/`EX` forms (25 sites in Neo Turf Masters, none hot). The next
   gains: flags left in the CCR until they are needed, the display (below) before any of it.
 - **Speed of the display** (section 7).
+- **Coverage.** Random play still finds untranslated code about once in five hours of play; it then runs through
+  the interpreter on the Amiga (slower there, and against the brief's rule, which is why it is counted). Better
+  input for `tools/explore_ngpc.sh` (playing whole rounds, not random presses) would close more of it.
 - **Sound beyond the recordings** (section 7): commands the bench never sends are silent; stereo is folded (a
   voice on both sides plays on one); DAC samples are not played.
 - **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data cut
@@ -390,3 +422,12 @@ sections above if a lesson is general.
   silent until the music's next note, and chip registers survive a driver restart.
 - Next time: compare with the real thing from the first stream (`tools/check_music_ngpc.sh`); every rule in the
   mixer came from a difference it showed.
+- Floppy and coverage, same session (the user asked for an ADF): the first image booted and stopped at the title
+  within a minute, in code no trace had reached. Tracing an idle run, longer taps and random presses, then
+  `tools/explore_ngpc.sh` (random scripts on the host, the stopping ones traced with the port's own interpreter),
+  took the translation from 583 to 976 functions. A scripted proof (`tools/verify_ngpc.sh N script`) then found a
+  bug the bench never touched: the interpreter read a 24-bit address as 32 bits, putting the next opcode byte in
+  the top byte of `LDA`'s result (`cpu_rd` size 3, in `cpu900.h`, shared with `ngpref`). Untranslated code that
+  play still reaches runs through the interpreter on the Amiga instead of ending the game.
+- Next time: trace the attract mode and a long session of varied input on the first day, and verify the
+  translation over those scripts as well as the bench; a bench path proves only the bench path.

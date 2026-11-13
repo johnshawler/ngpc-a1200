@@ -49,6 +49,7 @@ once, on the host, and prove the translation against an interpreter tick by tick
 | `examples/` | Four small programs built on the kit: scrolling, still screen, per-pixel, sound |
 | `tools/ngpref/`, `tools/tlcs900.py`, `tools/recomp900.py`, `tools/back900.py`, `src/ngpc/` | Neo Geo Pocket Color: reference machine, CPU tables, translator with its 68k back end, the port's machine layer and frame model |
 | `tools/sndrec_ngpc.c`, `src/ngpc/psg.c`, `src/ngpc/sndplay.c`, `src/ngpc/sound_ngp.c` | Neo Geo Pocket Color sound: the game's own sound program recorded per command on the host, mixed and played on Paula |
+| `tools/explore_ngpc.sh`, `tools/make_adf_ngpc.sh`, `tools/test_adf_ngpc.sh` | Neo Geo Pocket Color: grow the translation by random play; a bootable 880 KB floppy of the port (cartridge and program packed with LZMA) and its test |
 | `tools/nesref/`, `tools/recomp.py`, `tools/back68k.py`, `src/*.c` | NES: reference machine, translator with a 68k back end, the Little League Baseball port |
 | `samples/` | Three small PC games for trying a model out |
 | `original/`, `src/`, `assets/`, `dist/` | The game to port, the port's code, its converted data, the built program |

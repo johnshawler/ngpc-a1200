@@ -71,5 +71,5 @@ backlog is in history/llb/PIPELINE.md.
 | 2 | The 68k back end: flags kept in the CCR until read, a word routine for video memory (map cells are words) | logic is 38% of the machine |
 | 3 | Sound: more input scripts so the recorder sees every song and effect; stereo | commands the bench never sends are silent |
 | 4 | Ticks that take several frames alone (scene changes: 16,000 instructions and 7,600 video bytes in one tick, 9.5 frames): video writes and copies faster | the rest of the lost game time |
-| 5 | Trace the rest of the game (other courses, modes) | untraced code stops the port |
+| 5 | Better input for `tools/explore_ngpc.sh` (whole rounds, options, other modes) | untraced code runs through the interpreter |
 | 6 | Why the profiling build does not finish 3,600 ticks | profiles of play need it |

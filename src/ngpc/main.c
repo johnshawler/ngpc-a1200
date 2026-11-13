@@ -24,7 +24,9 @@
 #include "logic.h"
 #include "k2ge.h"
 #include "sound_ngp.h"
+#include "unlzma.h"
 
+#define TICKS_PER_SECOND_DOS 50         /* AmigaDOS's clock (DateStamp ticks) */
 #undef TICKS_PER_SECOND                 /* <proto/dos.h> has its own */
 #define TICKS_PER_SECOND 60             /* the Neo Geo Pocket shows 60 frames a second: 6 ticks every 5 frames */
 
@@ -58,12 +60,42 @@ static ULONG logic_total, logic_worst;  /* colour clocks spent in game_tick: the
 static ULONG logic_seen;
 static int skipped_in_row;
 
+/* The cartridge: rom.bin as it is, or rom.lzma, the packed copy a floppy holds (tools/make_adf_ngpc.sh). Fast RAM if
+   there is any. */
+static UBYTE *load_cartridge(ULONG *len)
+{
+    ULONG plen = 0, n;
+    UBYTE *rom = sys_load("rom.bin", MEMF_ANY, len), *packed;
+    UWORD *work;
+    if (rom) return rom;
+    if (!(packed = sys_load("rom.lzma", MEMF_ANY, &plen))) return 0;
+    if ((n = unlzma_size(packed, plen)) == 0xffffffffUL) return 0;
+    printf("Unpacking the cartridge (%lu KB)...\n", (unsigned long)(n / 1024));
+    rom = sys_alloc(n, MEMF_ANY);
+    work = sys_alloc(unlzma_work(packed), MEMF_ANY);
+    if (!rom || !work) {
+        printf("not enough memory to unpack the cartridge: %lu KB needed in one piece, %lu KB is (%lu KB free in all)\n",
+               (unsigned long)(n / 1024), (unsigned long)(AvailMem(MEMF_ANY | MEMF_LARGEST) / 1024), (unsigned long)(AvailMem(MEMF_ANY) / 1024));
+        return 0;
+    }
+    {   struct DateStamp t0, t1;
+        LONG ticks;
+        DateStamp(&t0);
+        if ((plen = unlzma(packed, plen, rom, n, work)) != n) { printf("rom.lzma is damaged (%ld of %lu bytes)\n", (long)plen, (unsigned long)n); return 0; }
+        DateStamp(&t1);
+        ticks = (t1.ds_Minute - t0.ds_Minute) * 60 * TICKS_PER_SECOND_DOS + (t1.ds_Tick - t0.ds_Tick);
+        printf("Unpacked in %ld.%ld s\n", (long)(ticks / TICKS_PER_SECOND_DOS), (long)(ticks % TICKS_PER_SECOND_DOS * 10 / TICKS_PER_SECOND_DOS));
+    }
+    *len = n;
+    return rom;
+}
+
 static int game_load(void)
 {
     ULONG romlen = 0, fontlen = 0;
-    UBYTE *rom = sys_load("rom.bin", MEMF_ANY, &romlen);        /* the cartridge: fast RAM if there is any */
+    UBYTE *rom = load_cartridge(&romlen);
     UBYTE *font = sys_load("font.bin", MEMF_ANY, &fontlen);     /* the BIOS's character set, if the user has it */
-    if (!rom) { printf("cannot load rom.bin: file missing, or not enough memory for %s\n", "the cartridge"); return 0; }
+    if (!rom) { printf("cannot load rom.bin or rom.lzma: file missing, or not enough memory for %s\n", "the cartridge"); return 0; }
     chunky = sys_alloc(K2GE_W * K2GE_H_LINES, MEMF_ANY | MEMF_CLEAR);
     rgb_of = sys_alloc(4096 * 4, MEMF_ANY);
     if (!chunky || !rgb_of || !sound_load()) return 0;
@@ -183,6 +215,8 @@ int main(int argc, char **argv)
     disp_close();
     sys_free_all();
     if (ngp_fatal_why) printf("stopped: reason %d at %06lx (see src/ngpc/ngp.h)\n", ngp_fatal_why, (unsigned long)ngp_fatal_pc);
+    {   extern ULONG asm_interp_calls;
+        if (asm_interp_calls) printf("code the traces had not reached ran through the interpreter %lu times (tools/explore_ngpc.sh)\n", (unsigned long)asm_interp_calls); }
     if (bench) {
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
         sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlogic_cck=%lu max=%lu pics=%lu/%lu draw_cck=%lu conv_cck=%lu",
