@@ -391,6 +391,12 @@ static int sprite_pixel(const Spr *s, int x, int y)  /* 0 or the colour 1-3 of s
 static uint32_t ktab[16][256];
 static uint8_t cpres[256];
 #define L4(q) (*(uint32_t *)(void *)(q))
+static int differ4(const uint8_t *a, const uint8_t *b, int n)   /* memcmp != 0, 4 bytes at a time (libnix's goes by bytes) */
+{
+    int i;
+    for (i = 0; i < n; i += 4) if (L4(a + i) != L4(b + i)) return 1;
+    return 0;
+}
 HWFN int hw_cell_fast(int cx, int cy)           /* no sprite, plane on the 8 x 8 grid, inside the window: 1 when done */
 {
     const uint8_t *map = V + (back_sel ? 0x1000 : 0x1800), *chr = V + 0x2000;
@@ -657,11 +663,14 @@ HWFN int hw_front_plane_under(int x0, int y0, int x1, int y1)    /* any front-pl
 }
 HWFN void hw_find_objects(void)
 {
-    static uint8_t last[0x100 + 0x40 + 2]; static int known;
-    if (known && !front_changed && !memcmp(last, V + 0x800, 0x100) && !memcmp(last + 0x100, V + 0xc00, 0x40) && last[0x140] == V[0x20] && last[0x141] == V[0x21])
-        return;                                  /* the same sprites, the same front plane: the same objects */
-    memcpy(last, V + 0x800, 0x100); memcpy(last + 0x100, V + 0xc00, 0x40); last[0x140] = V[0x20]; last[0x141] = V[0x21]; known = 1;
-    int i, j, lastx = 0, lasty = 0, par[64], oid[64], m = 0;
+    static uint8_t last[0x100 + 0x40 + 4]; static int known;
+    int i, j, lastx = 0, lasty = 0, par[64], oid[64], m = 0, same;
+    same = known && !differ4(last, V + 0x800, 0x100) && !differ4(last + 0x100, V + 0xc00, 0x40) && last[0x140] == V[0x20] && last[0x141] == V[0x21];
+    if (same && !front_changed) return;          /* the same sprites, the same front plane: the same objects */
+    if (same) goto decide;                       /* only the front plane changed: which objects go in front */
+    for (i = 0; i < 0x100; i += 4) L4(last + i) = L4(V + 0x800 + i);
+    for (i = 0; i < 0x40; i += 4) L4(last + 0x100 + i) = L4(V + 0xc00 + i);
+    last[0x140] = V[0x20]; last[0x141] = V[0x21]; known = 1;
     nspr = 0;
     for (i = 0; i < 64; i++) {
         const uint8_t *s = V + 0x0800 + i * 4;
@@ -681,8 +690,8 @@ HWFN void hw_find_objects(void)
     }
     for (i = 0; i < nspr; i++) par[i] = i;
     {   /* touching sprites (8 pixels apart at most) are in neighbouring 8 x 8 buckets: only those are compared */
-        static int8_t head[21 * 20]; int8_t next[64];
-        memset(head, -1, sizeof head);
+        static int8_t head[21 * 20]; static int inited; int8_t next[64]; int16_t used[64]; int nused = 0;
+        if (!inited) { memset(head, -1, sizeof head); inited = 1; }
         for (i = 0; i < nspr; i++) {
             int bx = (spr[i].x + 8) >> 3, by = (spr[i].y + 8) >> 3, ox, oy;
             for (oy = by - 1; oy <= by + 1; oy++) for (ox = bx - 1; ox <= bx + 1; ox++) {
@@ -697,8 +706,10 @@ HWFN void hw_find_objects(void)
                     }
                 }
             }
+            if (head[by * 21 + bx] < 0) used[nused++] = (int16_t)(by * 21 + bx);
             next[i] = head[by * 21 + bx]; head[by * 21 + bx] = (int8_t)i;
         }
+        for (i = 0; i < nused; i++) head[used[i]] = -1;   /* clean again for the next frame */
     }
     nobj = 0;
     for (i = 0; i < nspr; i++) { int r = i; while (par[r] != r) r = par[r]; par[i] = r; oid[i] = -1; }
@@ -715,6 +726,7 @@ HWFN void hw_find_objects(void)
     }
     for (j = 0; j < nobj; j++) { obj[j].first = (uint8_t)m; m += obj[j].count; obj[j].count = 0; }
     for (i = 0; i < nspr; i++) { int id = oid[par[i]]; if (id >= 0) members[obj[id].first + obj[id].count++] = (uint8_t)i; }
+decide:
     for (j = 0; j < nobj; j++) {
         Obj *o = &obj[j];
         o->front = o->x1 - o->x0 >= 32 || o->y1 - o->y0 >= 32 || hw_front_plane_under(o->x0, o->y0, o->x1, o->y1);
@@ -816,12 +828,6 @@ int hwdisp_init(void)
     return 1;
 }
 
-static int differ4(const uint8_t *a, const uint8_t *b, int n)   /* memcmp != 0, 4 bytes at a time (libnix's goes by bytes) */
-{
-    int i;
-    for (i = 0; i < n; i += 4) if (L4(a + i) != L4(b + i)) return 1;
-    return 0;
-}
 void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
 {
     int i, sel = (v[0x30] & 0x80) ? 0 : 1, fsx, fsy, blank;
