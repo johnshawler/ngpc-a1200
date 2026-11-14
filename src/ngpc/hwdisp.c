@@ -32,8 +32,7 @@
 #define KEY_EDGE  97
 #define KEY_BLACK 98
 #define NKEY      99
-#define BULK_CHR  48                            /* more changed characters or cells than this in a frame: everything again */
-#define BULK_CELL 192
+#define BULK_CELL 512                           /* more changed map cells than this in a frame: a new screen, everything again */
 #define MAXOBJ    64
 #define NCACHE    24
 
@@ -41,7 +40,11 @@ int hwdisp_tiles_per_frame = 4, hwdisp_cells_per_frame = 20, hwdisp_s4_strip = 2
 HwStats hwdisp_last;
 uint32_t hwdisp_budget;                         /* colour clocks this frame's drawing may take (0: no limit) */
 static uint32_t frame_t0;
-static int out_of_time(void) { return hwdisp_budget && hw_now() - frame_t0 >= hwdisp_budget; }
+static uint32_t phase_cut;                      /* the current phase may draw until frame_t0 + phase_cut */
+static int out_of_time(void) { return hwdisp_budget && hw_now() - frame_t0 >= phase_cut; }
+static int hold, complete, hold_cool;                      /* pictures left to keep the screen black after a scene change (0: shown);
+                                                   complete: the last picture left nothing to draw */
+#define HOLD_MAX 50                             /* at most 2 seconds at 25 pictures a second */
 
 static const uint8_t *V;
 static int back_sel = -1;                       /* the back plane's map: 0 = 0x9000, 1 = 0x9800 */
@@ -65,7 +68,7 @@ static int pf_rgb_ok, bank_rgb_ok;
 
 /* front layer */
 static uint8_t keybuf[HW_VIEW_H][FW];
-static uint32_t fdm[FCH], fpm[2][FCH];          /* per row of cells, bit cx: to compose; to convert into sprite copy 0 / 1 */
+static uint32_t fdm[FCH], fpm[2][FCH], fcp[2][FCH];   /* fcp: cells to copy into sprite copy 0 / 1 from the other */          /* per row of cells, bit cx: to compose; to convert into sprite copy 0 / 1 */
 #define FULLROW ((1u << FCW) - 1)
 static void fdirty_all(void) { int y; for (y = 0; y < FCH; y++) fdm[y] = FULLROW; }
 static uint32_t cellkeys[FCH][FCW][4];          /* the keys each cell holds */
@@ -313,7 +316,8 @@ HWFN void hw_tiles_work(void)
     for (c = w0; c <= w1; c++) if (cgen[c] != cur_gen) { coursem[c] = 0; cgen[c] = cur_gen; }   /* invalidated in bulk */
     for (pass = 0; pass < 2; pass++)
         for (c = w0; c <= w1; c++) {
-            uint32_t m = ALLROWS & ~coursem[c] & (pass ? ~seen_m : seen_m);
+            uint32_t near = (seen_m << 1 | seen_m >> 1) & ALLROWS & ~seen_m;   /* the rows next to the view */
+            uint32_t m = ~coursem[c] & (pass ? near : seen_m);   /* the rest are drawn when they scroll into view */
             for (r = 0; m; r++, m >>= 1) {
                 if (!(m & 1)) continue;
                 if (!n || out_of_time()) { n = 0; for (; m; m >>= 1) left += m & 1; break; }   /* out of time: only count */
@@ -358,6 +362,7 @@ static void back_cell_changed(int i)
 }
 static void reset_all(void)                     /* everything again, over the next frames (scene change, planes swapped) */
 {
+    if (!hold_cool) { hold = HOLD_MAX; complete = 0; }   /* black until the new screen is complete, not a block at a time */
     front_changed = 1;
     inval_all_course();
     fdirty_all(); fdirty_any = 1;
@@ -592,6 +597,20 @@ HWFN int hw_remap_needed(void)                    /* only when it pays: a free e
     if (s4max && (s4min == 0 || s4max > 2 * s4min + 64)) return 1;
     return 0;
 }
+static void copy_cell(int b, int cx, int cy)   /* a cell's sprite bytes from the other copy, which has it converted */
+{
+    int g = cx >> 3, s4 = g == hwdisp_s4_strip, pair = g == (hwdisp_s4_strip ? 0 : 1), w = (cx & 7) >> 1, r, k;
+    uint16_t mask = (cx & 1) ? 0x00ff : 0xff00;
+    for (k = 0; k < (s4 ? 1 : 2); k++) {
+        int n = s4 ? 4 : pair * 2 + k;
+        uint16_t *d = sprblk[b][n], *q = sprblk[!b][n];
+        for (r = 0; r < 8 && cy * 8 + r < HW_VIEW_H; r++) {
+            int o = 8 + (cy * 8 + r) * 8;
+            d[o + w] = (uint16_t)((d[o + w] & ~mask) | (q[o + w] & mask));
+            d[o + 4 + w] = (uint16_t)((d[o + 4 + w] & ~mask) | (q[o + 4 + w] & mask));
+        }
+    }
+}
 HWFN void hw_convert_cell(int b, int cx, int cy)
 {
     int g = cx >> 3, s4 = g == hwdisp_s4_strip, pair = g == (hwdisp_s4_strip ? 0 : 1), byte = cx & 7, r;   /* pair 1: sprites 2+3 (the first strip that is not sprite 4's), pair 0: sprites 0+1 */
@@ -618,14 +637,19 @@ HWFN void hw_convert_cell(int b, int cx, int cy)
 HWFN void hw_front_work(int blank)
 {
     int cx, cy, n = hwdisp_cells_per_frame, b = frame_no & 1, left = 0, i;
+    uint32_t cut = phase_cut, used = hw_now() - frame_t0;
+    if (used < cut) phase_cut = used + (cut - used) / 2;   /* composing gets half: converting must never starve */
     if (fdirty_any) {
+        static int rot;                          /* the row where the last picture stopped: every row gets its turn */
+        int k;
         fdirty_any = 0;
-        for (cy = 0; cy < FCH; cy++) {
-            uint32_t m = fdm[cy];
+        for (k = 0; k < FCH; k++) {
+            uint32_t m;
+            cy = (rot + k) % FCH; m = fdm[cy];
             for (cx = 0; m; cx++, m >>= 1) {
                 if (!(m & 1)) continue;
                 if (n && !out_of_time()) { hw_compose_cell(cx, cy); fdm[cy] &= ~(1u << cx); n--; hwdisp_last.composed++; }
-                else { n = 0; left++; fdirty_any = 1; for (m >>= 1; m; m >>= 1) left += m & 1; break; }
+                else { if (n) rot = cy; n = 0; left++; fdirty_any = 1; for (m >>= 1; m; m >>= 1) left += m & 1; break; }
             }
         }
     }
@@ -637,16 +661,28 @@ HWFN void hw_front_work(int blank)
         hwdisp_last.remaps++;
     }
     n = hwdisp_cells_per_frame * 2;              /* conversions are cheaper than composing (FEASIBILITY.md: 20 cells) */
+    phase_cut = cut;
     if (fpend_any) {
         int more = 0;
-        for (cy = 0; cy < FCH; cy++) {
-            uint32_t m = fpm[b][cy];
+        for (cy = 0; cy < FCH; cy++) {           /* first the cells the other copy converted last picture */
+            uint32_t m = fcp[b][cy] & ~fpm[b][cy];
+            for (cx = 0; m; cx++, m >>= 1) if (m & 1) copy_cell(b, cx, cy);
+            fcp[b][cy] &= fpm[b][cy];
+        }
+        static int rot;
+        int k;
+        for (k = 0; k < FCH; k++) {
+            uint32_t m;
+            cy = (rot + k) % FCH; m = fpm[b][cy];
             for (cx = 0; m; cx++, m >>= 1) {
                 if (!(m & 1)) continue;
-                if (n && !out_of_time()) { hw_convert_cell(b, cx, cy); fpm[b][cy] &= ~(1u << cx); n--; hwdisp_last.cells++; }
-                else { n = 0; left++; break; }
+                if (n && !out_of_time()) {   /* converted once; the other copy gets it by copy_cell() */
+                    hw_convert_cell(b, cx, cy); fpm[b][cy] &= ~(1u << cx); fpm[!b][cy] &= ~(1u << cx); fcp[!b][cy] |= 1u << cx; fcp[b][cy] &= ~(1u << cx);
+                    n--; hwdisp_last.cells++;
+                }
+                else { if (n) rot = cy; n = 0; left++; break; }
             }
-            more |= fpm[b][cy] | fpm[!b][cy];
+            more |= fpm[b][cy] | fpm[!b][cy] | fcp[!b][cy];
         }
         fpend_any = more;
     }
@@ -654,7 +690,7 @@ HWFN void hw_front_work(int blank)
     if (palette_moved || colours_changed) {
     for (i = 0; i < 16; i++) {
         uint32_t c = entry_key[i] ? rgb24(key_col12(entry_key[i])) : 0;
-        if (blank && entry_key[i] != KEY_BLACK) c = rgb24(col12(0xf8 + (V[0x12] & 7)));   /* an empty window */
+        if (blank && entry_key[i] != KEY_BLACK) c = blank == 2 ? 0 : rgb24(col12(0xf8 + (V[0x12] & 7)));   /* an empty window; a scene not ready */
         if (!bank_rgb_ok || c != bank_rgb[i]) { bank_rgb[i] = c; bank_rgb_ok = 0; }
     }
     if (!bank_rgb_ok) { hw_palette(bank_rgb, HW_SPR_BANK * 16, 16); bank_rgb_ok = 1; }
@@ -855,12 +891,13 @@ int hwdisp_init(void)
 
 void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
 {
-    int i, sel = (v[0x30] & 0x80) ? 0 : 1, fsx, fsy, blank, n_chr = 0, n_cell = 0, bulk;
+    int i, sel = (v[0x30] & 0x80) ? 0 : 1, fsx, fsy, blank, n_cell = 0, bulk;
+    static int hold_was;
     int32_t want_cam;
     V = v;
     memset(&hwdisp_last, 0, sizeof hwdisp_last);
     front_changed = 0;
-    frame_t0 = hw_now();
+    frame_t0 = hw_now(); phase_cut = hwdisp_budget;
     {   static uint8_t snap[0x200 + 2]; static int blank_was = -1; int bl = !v[4] || !v[5] || v[2] >= 160 || v[3] >= HW_VIEW_H;
         palette_moved = colours_changed || bl != blank_was || differ4(snap, v + 0x200, 0x200) || snap[0x200] != v[0x12] || snap[0x201] != v[0x118];
         if (palette_moved) { memcpy(snap, v + 0x200, 0x200); snap[0x200] = v[0x12]; snap[0x201] = v[0x118]; blank_was = bl; }
@@ -869,7 +906,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
     if (dirty->any) {                           /* changed characters: a new version, emptiness worked out when asked */
         for (i = 0; i < 512; i += 4) if (L4(dirty->chr + i)) {
             int k;
-            for (k = i; k < i + 4; k++) if (dirty->chr[k]) { chr_gen[k]++; char_stale[k] = 1; n_chr++; }
+            for (k = i; k < i + 4; k++) if (dirty->chr[k]) { chr_gen[k]++; char_stale[k] = 1; }
         }
         for (i = 0; i < 2048; i += 4) if (L4(dirty->cell + i)) {
             int k;
@@ -877,7 +914,8 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
         }
     }
     if (sel != back_sel) { back_sel = sel; reset_all(); }
-    else if (n_chr > BULK_CHR || n_cell > BULK_CELL) reset_all();   /* a scene change: everything again, spread over frames */
+    else if (n_cell > BULK_CELL) reset_all();   /* a scene change (most of a map rewritten): everything again, spread over frames.
+                                                   Changed characters alone are not one: the game animates by uploading them */
     bulk = !maps_ok;
     /* back plane scroll: U adds up the horizontal steps; vertical is the row */
     {
@@ -921,14 +959,12 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
             front_changed = 1;                          /* changed characters: the cells and objects that show them */
             int ch, k;
             clear_cache();
-            int touched = 0;
-            for (ch = 0; ch < 512 && touched <= BULK_CELL; ch++) {   /* the cells that use each changed character, from its lists */
+            for (ch = 0; ch < 512; ch++) {       /* the cells that use each changed character, from its lists */
                 if (!(ch & 3) && !L4(dirty->chr + ch)) { ch += 3; continue; }
                 if (!dirty->chr[ch]) continue;
-                for (k = ch_head[0][ch]; k >= 0; k = ch_next[0][k]) { inval_back_cell(k & 31, k >> 5); touched++; }
-                for (k = ch_head[1][ch]; k >= 0; k = ch_next[1][k]) { front_map_cell_changed(k & 31, k >> 5); touched++; }
+                for (k = ch_head[0][ch]; k >= 0; k = ch_next[0][k]) inval_back_cell(k & 31, k >> 5);
+                for (k = ch_head[1][ch]; k >= 0; k = ch_next[1][k]) front_map_cell_changed(k & 31, k >> 5);
             }
-            if (touched > BULK_CELL) { inval_all_course(); fdirty_all(); fdirty_any = 1; }   /* too many: everything again */
             for (i = 0; i < nfspr_prev; i++) if (dirty->chr[fspr_prev[i].e & 0x1ff]) front_cell_mark(fspr_prev[i].x, fspr_prev[i].y, fspr_prev[i].x + 7, fspr_prev[i].y + 7);
         }
         if (dirty->any) for (i = 0; i < 1024; i += 4) {   /* 4 flags at a time: most are 0 */
@@ -952,9 +988,24 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
     hw_find_objects();
     hw_front_objects_changed();
     hw_retry_aliases();
-    { uint32_t t = hw_now(); hw_tiles_work(); hwdisp_last.t_tiles = hw_now() - t; }
+    if (hold_cool) hold_cool--;
+    if (hold && (complete || !--hold)) { hold = 0; hold_cool = HOLD_MAX; }   /* complete last picture (or too long): show it */
+    if (hold_was != !!hold) { colours_changed = 1; hold_was = !!hold; }   /* the colours change with it */
     blank = !v[4] || !v[5] || v[2] >= 160 || v[3] >= HW_VIEW_H;  /* an empty window: the edge colour everywhere */
-    { uint32_t t = hw_now(); hw_front_work(blank); hwdisp_last.t_front = hw_now() - t; t = hw_now();
+    if (hold && !blank) blank = 2;               /* a scene still being drawn: black */
+    {   /* the front layer (HUD, text, large objects) first, with half of what is left; then the course; then the
+           front layer again with whatever remains. Neither can take all of a picture's time. */
+        uint32_t t = hw_now(), used = t - frame_t0;
+        phase_cut = used < hwdisp_budget ? used + (hwdisp_budget - used) / 2 : used;
+        hw_front_work(blank);
+        hwdisp_last.t_front = hw_now() - t;
+        phase_cut = hwdisp_budget; t = hw_now();
+        hw_tiles_work();
+        hwdisp_last.t_tiles = hw_now() - t;
+        if (hwdisp_last.cells_left && !out_of_time()) { t = hw_now(); hw_front_work(blank); hwdisp_last.t_front += hw_now() - t; }
+    }
+    complete = maps_ok && !hwdisp_last.tiles_left && !hwdisp_last.cells_left && !fdirty_any;   /* shown from the next picture */
+    { uint32_t t = hw_now();
     for (i = 0; i < nobj && !blank; i++) if (!obj[i].front) {
         Bobc *b = hw_bob_image(&obj[i]);
         hw_bob(W0 + U + obj[i].x0, cam_y + obj[i].y0, b->img, b->msk, b->wwords, b->h);
@@ -968,7 +1019,7 @@ void hwdisp_frame(const uint8_t *v, K2geDirty *dirty)
         c[0] = 0; c[1] = rgb24(col12(0xf0 + (v[0x118] & 7)));
         for (s = 0; s < NSLOT; s++) for (k = 1; k < 4; k++) c[2 + 3 * s + k - 1] = slot_key[s] >= 0 ? rgb24(slotkey_col12(slot_key[s], k)) : 0;
         for (s = 2 + 3 * NSLOT; s < 64; s++) c[s] = 0;
-        if (blank) { uint32_t e = rgb24(col12(0xf8 + (v[0x12] & 7))); for (s = 1; s < 64; s++) c[s] = e; }
+        if (blank) { uint32_t e = blank == 2 ? 0 : rgb24(col12(0xf8 + (v[0x12] & 7))); for (s = 1; s < 64; s++) c[s] = e; }
         for (s = 0; s < 64; s++) if (!pf_rgb_ok || c[s] != pf_rgb[s]) { if (s < lo) lo = s; hi = s; pf_rgb[s] = c[s]; }
         if (hi >= 0) hw_palette(pf_rgb + lo, lo, hi - lo + 1);
         pf_rgb_ok = 1;

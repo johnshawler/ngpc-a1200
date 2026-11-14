@@ -45,7 +45,7 @@ static ULONG palette[256];
 #define PICTURE_HZ 50                            /* port.conf: 25 = a new picture every second vertical blank (BRIEF.md Step 2's last cut) */
 #endif
 #define VBL_PER_PICTURE (50 / PICTURE_HZ)
-#define FRAME_TARGET (71051UL * VBL_PER_PICTURE * 50 / 100)   /* logic and drawing of a pass: half of its frames */
+#define FRAME_TARGET (71051UL * VBL_PER_PICTURE * 70 / 100)   /* logic and drawing of a pass: 70% of its frames */
 static ULONG w_st, w_ti, w_fr, w_ob, st_big, st_big_sum;              /* the phases of the slowest drawing */
 static ULONG flip_vbl, late_heavy, late_other, pass_logic_max;   /* late blanks in passes with a heavy tick (over 100k) or not */                           /* sys_frame at the end of the last game_draw: the flip came one later */
 #define DRAW_FLOOR 6000UL                        /* the drawing that always happens: objects, sprites, colours */

@@ -27,13 +27,14 @@ typedef struct { int32_t x, y; const uint16_t *img, *msk; int ww, h; } Bob;
 static Bob bobs[64]; static int nbob;
 static struct { uint16_t *blk; int x, y, h, att, on; } spr[8];
 static long tiles_total;
+static int sim; static uint32_t fake;     /* -b: the simulated clock (hw_now below) */
 static int32_t who[(HW_BUF_H + 4) * RIB_W + HW_LEVEL_W + 2048];   /* which tile wrote each pixel: for finding faults */
 
 static uint8_t *rib(int32_t x, int32_t y) { return ribbon + (y + 2) * RIB_W + x + 64; }
 void hw_tile(int32_t x, int32_t y, const uint16_t *t)
 {
     int r, i, p;
-    tiles_total++;
+    tiles_total++; fake += 2500;
     if (x < 0 || x % 16 || x > HW_LEVEL_W + 320 || y < 0 || y + 16 > HW_BUF_H + 8) { printf("hw_tile outside: %d %d\n", x, y); return; }
     for (r = 0; r < 16; r++) for (i = 0; i < 16; i++) {
         int pen = 0;
@@ -56,7 +57,9 @@ void hw_sprite(int n, uint16_t *blk, int x, int y, int h, int att) { spr[n].blk 
 void hw_sprite_off(int n) { spr[n].on = 0; }
 void hw_scroll(int32_t x, int32_t y) { sc_x = x; sc_y = y; }
 void hw_palette(const uint32_t *rgb, int first, int count) { memcpy(pal + first, rgb, (size_t)count * 4); }
-uint32_t hw_now(void) { return 0; }   /* the host has no frame clock: the counts limit the work */
+/* -b: a simulated clock, so that the time budget bites as on the Amiga (rough costs: 900 colour clocks each time the
+   display looks at the clock, 2,500 a tile; the logic 21,000 a tick, PICTURE_HZ 25: 70% of two frames for a picture) */
+uint32_t hw_now(void) { return sim ? (fake += 900) : 0; }   /* without -b the counts limit the work */
 void *hw_chip(uint32_t bytes) { return calloc(1, bytes); }
 
 static int spr_bits(int n, int sx, int sy)     /* 2 bits of sprite n at screen (sx, sy), -1 outside */
@@ -108,13 +111,14 @@ int main(int argc, char **argv)
     unsigned n = (unsigned)atoi(argv[1]), t = 0, acc = 0;
     long frames = 0, exact = 0, bad_pf = 0, bad_spr = 0, bad_obj = 0, bad_border = 0, misses = 0, remaps = 0, rebases = 0, worst = 0, maxfront = 0;
     long w_scroll = 0, w_chr = 0, w_objs = 0, lagging = 0;
-    long frames_pf_ok = 0, first_border = -1, first_pf = -1;
+    long frames_pf_ok = 0, first_border = -1, first_pf = -1, stale = 0, stale_first = -1;
     int save_from = -1, save_n = 0, i; const char *save_dir = ".", *script = 0;
     if (!f || fread(rom, 1, sizeof rom, f) != sizeof rom) { printf("assets/rom.bin?\n"); return 1; }
     for (i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "-t")) hwdisp_tiles_per_frame = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-c")) hwdisp_cells_per_frame = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-s")) hwdisp_s4_strip = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-b")) { sim = 1; hwdisp_tiles_per_frame = hwdisp_cells_per_frame = 1000; }
         else if (!strcmp(argv[i], "-p")) { save_from = atoi(argv[++i]); save_n = atoi(argv[++i]); save_dir = argv[++i]; }
         else script = argv[i];
     }
@@ -123,8 +127,11 @@ int main(int argc, char **argv)
     if (!hwdisp_init()) return 3;
     while (t < n) {
         int x, y, wrong = 0, wrong_pf = 0;
-        acc += 60;                              /* 60 ticks a second, 50 pictures */
-        while (acc >= 50 && t < n) { acc -= 50; game_tick(script ? script_input(t) : game_bench_input(t)); t++; }
+        {   int k = 0;
+            acc += sim ? 120 : 60;              /* 60 ticks a second, 50 pictures (25 with -b) */
+            while (acc >= 50 && t < n) { acc -= 50; game_tick(script ? script_input(t) : game_bench_input(t)); t++; k++; }
+            if (sim) { uint32_t logic = 21000u * (uint32_t)k, target = 71051u * 2 * 70 / 100; hwdisp_budget = logic + 6000 < target ? target - logic : 6000; }
+        }
         nbob = 0;
         hwdisp_frame(ngp_vid, &ngp_dirty);
         render(pic, from);
@@ -146,6 +153,10 @@ int main(int argc, char **argv)
                 if (pic[y * 320 + x]) { int32_t w = who[rib(sc_x + x, sc_y + y) - ribbon]; printf("border px view %d,%d world %d,%d (col %d) written by tile col %d row %d; cam %d,%d\n", x, y, sc_x + x, sc_y + y, (sc_x + x) / 16, w / 64, w % 64, sc_x, sc_y); }
         }
         if (!wrong) exact++;
+        if (wrong_pf && !hwdisp_last.tiles_left && !hwdisp_last.cells_left && !(ngp_vid[4] == 0 || ngp_vid[5] == 0)) {
+            if (stale_first < 0) { stale_first = frames; printf("course wrong with nothing waiting: picture %ld (tick %u), %d pixels\n", frames, t, wrong_pf); }
+            stale++;
+        }
         if (!wrong_pf) frames_pf_ok++;
         else if (first_pf < 0) { first_pf = frames; printf("first playfield difference: picture %ld (tick %u), %d pixels; window %d,%d %dx%d\n", frames, t, wrong_pf, ngp_vid[2], ngp_vid[3], ngp_vid[4], ngp_vid[5]); }
         if (wrong > worst) worst = wrong;
@@ -180,6 +191,7 @@ int main(int argc, char **argv)
            pct(tl, (int)frames, 50), pct(tl, (int)frames, 95), pct(tl, (int)frames, 100), tiles_total, pct(cl, (int)frames, 50), pct(cl, (int)frames, 95), pct(cl, (int)frames, 100));
     printf("  objects a frame: median %d, max %d; front-layer objects at most %ld; palette slots missed %ld; front remaps %ld; rebases %ld\n",
            pct(bl, (int)frames, 50), pct(bl, (int)frames, 100), maxfront, misses, remaps, rebases);
+    printf("  course wrong with nothing waiting (not lag): %ld pictures\n", stale);
     printf("  front layer redrawn whole: %ld times for its scroll or window, %ld for characters of its objects; objects changed in %ld pictures; behind in %ld\n", w_scroll, w_chr, w_objs, lagging);
     return 0;
 }
