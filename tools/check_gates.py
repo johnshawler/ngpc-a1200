@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """check_gates.py - decide whether a bench run passes the brief's gates.
 
-usage: check_gates.py <bench.txt> --class planar|perpixel --ticks N [--host HEX] [--expect HEX]
+usage: check_gates.py <bench.txt> --class planar|perpixel --ticks N [--picture-hz 50|25] [--host HEX] [--expect HEX]
 
 planar:   late must be 0 and worst_pct at most 80.
+          With --picture-hz 25 (BRIEF.md Step 2's last cut: a new picture every second vertical blank, said in the
+          hand-back) a picture has two frames: late counts the blanks beyond the second one (the kit's late minus one
+          per picture after the first), worst_pct may reach 160 (80% of two frames), shown_fps must be 25.0.
 perpixel: no 50 Hz gate; shown_fps is reported.
 both:     ticks must equal N, and the checksum must equal the host test's (--host) when one is given.
 """
@@ -24,9 +27,16 @@ def main():
     cls, problems = opt.get('--class', 'planar'), []
     if int(f['ticks']) != int(opt.get('--ticks', f['ticks'])):
         problems.append('ticks=%s, expected %s' % (f['ticks'], opt['--ticks']))
-    if cls == 'planar':
+    hz = int(opt.get('--picture-hz', '50')); per = 50 // hz
+    if cls == 'planar' and per == 1:
         if int(f['late']) != 0: problems.append('late=%s: %s vertical blanks went by without a new picture (must be 0)' % (f['late'], f['late']))
         if int(f['worst_pct']) > 80: problems.append('worst_pct=%s: the slowest frame is over 80%% of the budget' % f['worst_pct'])
+    elif cls == 'planar':
+        extra = int(f['late']) - (per - 1) * (int(f['frames']) - 1)
+        print('picture_hz=%d: late counted beyond %d blanks a picture: late_%d=%d (the kit\'s late=%s), worst_pct limit %d' % (hz, per, hz, extra, f['late'], 80 * per))
+        if extra != 0: problems.append('late_%d=%d: %d vertical blanks went by without the new picture due every %d (must be 0)' % (hz, extra, extra, per))
+        if int(f['worst_pct']) > 80 * per: problems.append('worst_pct=%s: the slowest picture is over 80%% of its %d frames' % (f['worst_pct'], per))
+        if float(f['shown_fps']) < hz - 0.1: problems.append('shown_fps=%s: fewer than %d pictures a second' % (f['shown_fps'], hz))
     for name, key in (('host test', '--host'), ('expected value', '--expect')):
         if opt.get(key):
             want = opt[key].lower().zfill(8)
@@ -40,7 +50,7 @@ def main():
         return 1
     speed = ('logic by the clock' if int(f.get('game_speed', '100')) >= 99 else
              'game time at %s%% of the clock: it falls behind where a pass takes more than 8 frames' % f['game_speed'])
-    print('PASS (%s)' % ('50 Hz held' if cls == 'planar' else 'per-pixel game: %s pictures a second, %s' % (f['shown_fps'], speed)))
+    print('PASS (%s)' % (('50 Hz held' if per == 1 else '%d pictures a second held: a new picture every %d vertical blanks' % (hz, per)) if cls == 'planar' else 'per-pixel game: %s pictures a second, %s' % (f['shown_fps'], speed)))
     return 0
 
 sys.exit(main())

@@ -129,7 +129,11 @@ tile and the sound: about 520 KB.
    is rewritten) and the golfer's bigger frames take more than one frame to appear; frames are not late, the
    changed parts show up to a few frames after the game made them.
 4. Raster effects stay unmodelled, as now.
-5. Not cut: 50 pictures a second (the 25-a-second fallback is not planned).
+5. **Cut, by the user's decision (2026-11-14): 25 pictures a second**, a new picture every second vertical blank
+   (`PICTURE_HZ=25` in port.conf; game time still follows the clock). At 50 the logic (about 25k colour clocks a frame, a
+   second tick every fifth picture, scene setups of up to 6 frames) and the display's fixed work did not fit a frame.
+   The referee judges this mode with the brief's gates scaled to two frames a picture (tools/check_gates.py
+   --picture-hz 25: no blank beyond the second, worst_pct at most 160, shown_fps 25.0); the hand-back says so.
 
 ## 8. Decisions for the user
 

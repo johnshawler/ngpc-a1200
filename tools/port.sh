@@ -33,7 +33,7 @@ if [ -n "$HOST_TEST" ]; then
   rm -f "$HT"
   [ -n "$HOSTSUM" ] || { echo "FAIL: host test printed no 8-digit hex checksum"; exit 1; }
 fi
-ARGS="--class ${EFFCLASS:-planar} --ticks $TICKS"
+ARGS="--class ${EFFCLASS:-planar} --ticks $TICKS --picture-hz ${PICTURE_HZ:-50}"
 [ -n "$HOSTSUM" ] && ARGS="$ARGS --host $HOSTSUM"
 [ -n "$EXPECT_CHECKSUM" ] && ARGS="$ARGS --expect $EXPECT_CHECKSUM"
 GATES=0; python3 tools/check_gates.py "$OUT" $ARGS || GATES=1

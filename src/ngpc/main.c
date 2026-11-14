@@ -41,7 +41,13 @@ extern void co_resume(void);
 static const DispCfg display = { .planes = HW_PLANES, .scroll = 1, .fetch = 1, .view_h = HW_VIEW_H, .buf_h = HW_BUF_H,
                                  .level_w = HW_LEVEL_W, .buffers = 3, .double_y = 0, .sprite_w = 64, .sprite_bank = HW_SPR_BANK };
 static ULONG palette[256];
-#define FRAME_TARGET (71051UL * 70 / 100)        /* logic and drawing of a pass: 70% of a frame */
+#ifndef PICTURE_HZ
+#define PICTURE_HZ 50                            /* port.conf: 25 = a new picture every second vertical blank (BRIEF.md Step 2's last cut) */
+#endif
+#define VBL_PER_PICTURE (50 / PICTURE_HZ)
+#define FRAME_TARGET (71051UL * VBL_PER_PICTURE * 50 / 100)   /* logic and drawing of a pass: half of its frames */
+static ULONG w_st, w_ti, w_fr, w_ob, st_big, st_big_sum;              /* the phases of the slowest drawing */
+static ULONG flip_vbl, late_heavy, late_other, pass_logic_max;   /* late blanks in passes with a heavy tick (over 100k) or not */                           /* sys_frame at the end of the last game_draw: the flip came one later */
 #define DRAW_FLOOR 6000UL                        /* the drawing that always happens: objects, sprites, colours */
 static ULONG logic_at_draw;
 static ULONG ph_draw;
@@ -141,10 +147,17 @@ static void game_draw(void)
     disp_begin();                               /* erase the objects of two frames ago */
     hwdisp_frame(ngp_vid, &ngp_dirty);          /* tiles, front layer, objects, sprites, scroll, colours */
     t = sys_now() - t0;
-    draw_total += t; if (t > draw_worst) draw_worst = t;
+    if (hwdisp_last.t_start > 40000) { st_big++; st_big_sum += hwdisp_last.t_start; }
+    draw_total += t; if (t > draw_worst) { draw_worst = t; w_st = hwdisp_last.t_start; w_ti = hwdisp_last.t_tiles; w_fr = hwdisp_last.t_front; w_ob = hwdisp_last.t_objs; }
     hw_tiles += hwdisp_last.tiles; hw_cells += hwdisp_last.cells;
     ph_start += hwdisp_last.t_start; ph_tiles += hwdisp_last.t_tiles; ph_front += hwdisp_last.t_front; ph_objs += hwdisp_last.t_objs; ph_composed += hwdisp_last.composed; ph_draw += hwdisp_last.t_draw;
     if (hwdisp_last.tiles_left || hwdisp_last.cells_left) hw_behind++;
+#if VBL_PER_PICTURE > 1
+    /* the last picture was shown at vertical blank flip_vbl + 1: this one waits until the next has gone by, so that
+       disp_flip() shows it VBL_PER_PICTURE blanks after the last (game time still follows the clock: the loop's ticks) */
+    while (sys_frame - flip_vbl < VBL_PER_PICTURE) sys_wait_frame();
+#endif
+    flip_vbl = sys_frame;
 }
 
 /* ---- the loop: keep as it is ------------------------------------------------------------------ */
@@ -180,13 +193,15 @@ int main(int argc, char **argv)
             { ULONG c0 = prof_cnt;
 #endif
             game_tick(bench ? game_bench_input(ticks) : read_input());
-            t1 = sys_now() - t1; logic_total += t1; if (t1 > logic_worst) logic_worst = t1;
+            t1 = sys_now() - t1; logic_total += t1; if (t1 > logic_worst) logic_worst = t1; if (t1 > pass_logic_max) pass_logic_max = t1;
 #ifdef NGP_PROF_HEAVY
             if (t1 < NGP_PROF_HEAVY) prof_cnt = c0; }
 #endif
             ticks++;
         }
         game_draw();
+        if (vblanks > VBL_PER_PICTURE && frames) { if (pass_logic_max > 100000) late_heavy += vblanks - VBL_PER_PICTURE; else late_other += vblanks - VBL_PER_PICTURE; }
+        pass_logic_max = 0;
         frames++;
         perf_frame_end(sys_now() - t0);
         if (sys_keys[KEY_ESC] || (bench && ticks >= bench) || ngp_fatal_why) break;
@@ -205,13 +220,14 @@ int main(int argc, char **argv)
         /* game_speed: game time against the clock (100 = kept); the skeleton drops what a pass takes beyond 8 frames */
         /* the note holds 127 characters: per frame, colour clocks of logic (worst tick), drawing (worst), and the drawing's
            phases: st(art), ti(les) with the cost of a tile, fr(ont layer) with the cells composed, ob(jects) */
-        /* the note holds 127 characters: per frame, colour clocks of logic (worst tick), drawing (worst), and the drawing's
-           phases: st(art), ti(les; dw: drawing them), fr(ont layer) with the cells composed, ob(jects) */
-        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu st=%lu ti=%lu dw=%lu fr=%lu/%lu ob=%lu",
+        /* the note holds 127 characters: colour clocks of logic a tick (worst), drawing a frame (worst); late blanks in
+           passes with a tick over 100k (lh) and in the others (lo); start and tile phases a frame; start phases over 40k
+           (sb: how many / their average) */
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu lh=%lu lo=%lu st=%lu ti=%lu sb=%lu/%lu",
                 (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
                 (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)(frames ? draw_total / frames : 0),
-                (unsigned long)draw_worst, (unsigned long)(ph_start / frames), (unsigned long)(ph_tiles / frames), (unsigned long)(ph_draw / frames),
-                (unsigned long)(ph_front / frames), (unsigned long)ph_composed, (unsigned long)(ph_objs / frames));
+                (unsigned long)draw_worst, (unsigned long)late_heavy, (unsigned long)late_other, (unsigned long)(ph_start / frames),
+                (unsigned long)(ph_tiles / frames), (unsigned long)st_big, (unsigned long)(st_big ? st_big_sum / st_big : 0));
         perf_note(text);
 
         perf_save("bench.txt");
