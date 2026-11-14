@@ -145,7 +145,13 @@ static void game_draw(void)
     hwdisp_budget = logic + DRAW_FLOOR < FRAME_TARGET ? FRAME_TARGET - logic : DRAW_FLOOR;
     logic_at_draw = logic_total;
     disp_begin();                               /* erase the objects of two frames ago */
+#ifdef NGP_PROF_DRAWSTART                       /* tools/prof_ngpc.sh: only the samples of drawings with a long start phase */
+    { ULONG c0 = prof_cnt;
+#endif
     hwdisp_frame(ngp_vid, &ngp_dirty);          /* tiles, front layer, objects, sprites, scroll, colours */
+#ifdef NGP_PROF_DRAWSTART
+    if (hwdisp_last.t_start < NGP_PROF_DRAWSTART) prof_cnt = c0; }
+#endif
     t = sys_now() - t0;
     if (hwdisp_last.t_start > 40000) { st_big++; st_big_sum += hwdisp_last.t_start; }
     draw_total += t; if (t > draw_worst) { draw_worst = t; w_st = hwdisp_last.t_start; w_ti = hwdisp_last.t_tiles; w_fr = hwdisp_last.t_front; w_ob = hwdisp_last.t_objs; }
