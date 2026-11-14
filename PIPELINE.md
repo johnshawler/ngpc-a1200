@@ -56,15 +56,10 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: FAIL. Judged as the brief requires (class planar): late=1927, worst_pct=1836 with 4 MB fast RAM, and
-tools/check_rules.py fails the run-time interpreter and the missing approved plan. It was built per-pixel against the
-brief's route for a 2D game. Game time at 95% of the clock, 4.5 new pictures a second (the game makes 13.7),
-checksum equal; music and effects recorded from the game's own sound program (93-98% of sounding frames as the real
-driver within 3 frames); the stock machine cannot hold the cartridge. Logic (68k back end) 22,751 colour clocks a
-tick over the bench (38% of the machine at 60 ticks a second), a picture 181,138 to draw and 71,372 to convert. A
-model of the kit's loop fed with the bench's instructions per tick and average costs predicts 95% (measured 84%:
-the lost time is at scene changes, where heavy ticks meet full redraws, which averages hide). The previous port's
-backlog is in history/llb/PIPELINE.md.
+Status: FAIL, stopped at the gates at the user's decision (2026-11-14); REPORT.txt has the hand-back. On the brief's
+route (hardware display, no interpreter, rules check passes); 25 pictures a second chosen by the user; tools/port.sh
+fast: late_25=398 worst_pct=1411 shown_fps=21.7 checksum=ac36a76c (equal). What blocks the gates is the speed of the
+translated logic (item 9 and the logic-peaks row below).
 
 | Priority | Item | Why |
 | --- | --- | --- |

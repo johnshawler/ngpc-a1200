@@ -1,93 +1,71 @@
 PORT REPORT
-Verdict:               FAIL. The port departed from the brief: it was classed per-pixel (soft gates) although Neo Turf
-                       Masters is a 2D tile and sprite game, and it interprets the original CPU at run time for
-                       untranslated code and 25 instruction forms. Judged as the brief requires (class planar), it
-                       fails late=0 and worst_pct <= 80, and tools/check_rules.py fails it on the run-time interpreter
-                       and on the missing approved plan (FEASIBILITY.md). The PASS lines below were printed under the
-                       per-pixel class and do not stand.
+Verdict:               FAIL. Stopped at milestone 10's gates after real attempts, at the user's decision (2026-11-14).
+                       The port follows the brief's route (FEASIBILITY.md: hardware-scrolled tile map, sprites, kit
+                       objects; no run-time interpreter; tools/check_rules.py: no rule broken) and the game is correct
+                       (equal checksums), but neither 50 pictures a second nor the 25-a-second cut is held.
 Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World release, 2 MB cartridge, 60 Hz).
-                       Work in progress: correct, plays through the bench on the emulated A1200 with fast RAM, with
-                       its music and sound effects, not yet at full speed.
-Class and route:       Binary TLCS-900/H code. The Step 1 table has no row for this CPU; the route is the one of its row
-                       "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on the host
-                       (tools/recomp900.py) to C, entry points found by tracing the game on a reference machine
-                       (tools/ngpref), and from there to 68k assembly (tools/back900.py: TLCS registers in 68k registers;
-                       BACKEND=c in port.conf builds the C instead). K2GE, BIOS calls and interrupts are plain-C state
-                       (src/ngpc/ngp.c). The Z80 sound
-                       program is not run at all on the Amiga: what the game sees of it (an answer to each command, a
-                       tick counter) is modelled, and tools/check_sound_ngpc.sh proves the model against the real
-                       program, tick by tick. The display was built per-pixel (CLASS=perpixel, now planar in port.conf): the
-                       brief's route for this game is a hardware-scrolled tile map with sprites and kit objects.
-Display:               planes=8 scroll=0 fetch=3 buffers=2 sprites used=0 colours=256 (the K2GE's 256 palette entries
-                       are the pens). The 160 x 152 picture at its own size in the middle of a black 320 x 256 screen
-                       (the user's choice). Drawn into a byte buffer by k2ge_frame_cached (scroll planes kept drawn,
-                       redrawn only where the game changed cells or characters) and converted row by row with the
-                       kit's c2p1x1_8_c5_gen. A picture is drawn only when the game changed the K2GE's memory, and
-                       then only its lines whose inputs changed; only rows written since a screen buffer last got
-                       them are converted into it.
-Busiest moment:        play (ball flight and course views: both scroll planes, sprites, new picture every frame). Not
-                       a Step 2 sum: the reference machine measures 1,700-3,900 main-CPU instructions a frame there
-                       (5,200 at the 90th percentile, 13,100 at scene changes). On the Amiga, logic averages 22,751
-                       colour clocks a tick over the bench, a picture 182,312 to draw and 70,968 to convert.
-Cut from the original: the Z80 itself: its music and effects are recordings of the game's own sound program made on the
-                       host per command (tools/sndrec_ngpc.c), mixed and played on Paula; stereo is folded to one
-                       side per voice; commands the bench never sends play nothing; saved games (flash writes
-                       are accepted and forgotten); the serial link; the date (fixed). Raster effects: not modelled, and
-                       not seen used by this game in the bench (it takes the vertical blank interrupt only).
-Stock A1200 bench:     no bench.txt: the program ends before the takeover ("cannot load rom.bin: file missing, or not
-                       enough memory for the cartridge"). The cartridge holds 1,544 KB of data.
-                       (FS-UAE 3.1.66, tools/bench.sh dist ntm 300, AROS ROM)
-With 4 MB fast RAM:    tools/port.sh fast (3,600 ticks, AROS ROM):
-                       frames=1228 late=1925 worst_cck=1307866 avg_cck=137450 budget_cck=71051 worst_pct=1840 avg_pct=193 display_hz=50 shown_fps=19.4
-                       ticks=3600 checksum=ac36a76c game_speed=95%
-                       logic_cck=22748 max=452394 pics=286/471 draw_cck=182025 conv_cck=71065
-                       KICKSTART=original/kick31_a1200.rom tools/port.sh fast (Kickstart 3.1 40.68, supplied by the user):
-                       frames=1228 late=1927 worst_cck=1305193 avg_cck=137618 budget_cck=71051 worst_pct=1836 avg_pct=193 display_hz=50 shown_fps=19.4
-                       ticks=3600 checksum=ac36a76c game_speed=95%
-                       logic_cck=22728 max=451619 pics=287/473 draw_cck=181671 conv_cck=71175
-                       Printed at the time: PASS on both (per-pixel game: 19.4 pictures a second, game time at 95%).
-                       The same bench under the brief's gates (python3 tools/check_gates.py bench_fast.txt --class
-                       planar --ticks 3600 --host ac36a76c):
-                       FAIL: late=1927: 1927 vertical blanks went by without a new picture (must be 0)
-                       FAIL: worst_pct=1836: the slowest frame is over 80% of the budget
-                       With sound playing. A pass whose ticks took over 2 frames draws no new picture (at most
-                       8 in a row); without that rule (and before block copies were one call): 15.1 and 83%.
-Host checksum:         ac36a76c after 3,600 ticks: equal. On the host the translation equals the interpreter after every
-                       one of 3,600 ticks (tools/verify_ngpc.sh: RAM, K2GE, ports, registers), the sound model equals
-                       the real sound program as the game sees it after every one of 3,600 ticks
-                       (tools/check_sound_ngpc.sh), and the renderers equal the reference renderer after every tick
-                       (host_test -k). Over three input scripts of 36,000 ticks (tools/flow_ngpc/ntm_*.in: idle,
-                       taps, random presses) the translation's checksum equals the interpreter's after every tick, and
-                       the full machine is equal after every one of their first 12,000 ticks (tools/verify_ngpc.sh N
-                       script). The music and effects the Amiga plays: per voice, 93-98% of the 50 Hz frames
-                       where it sounds hold the same note and volume as the real sound program within 3 frames and one
-                       volume step, 80-92% exactly for the tones (tools/check_music_ngpc.sh, 3,600 ticks).
-Frame rate claim:      With 4 MB fast RAM: logic at 60 ticks a second where a pass stays within 8 frames; over the whole
-                       bench game time runs at 95% of the clock. Pictures: the kit's shown_fps (19.4) counts passes,
-                       each of which shows the newest picture drawn so far; new pictures drawn: 286 in 3,153 vertical
-                       blanks (63.1 s), 4.5 a second. The game changes its picture in 823 of the 3,600 ticks
-                       (host_test prints it), 13.7 a second at its 60 Hz: the Amiga shows about a third of its picture
-                       changes, every change of colours (fades) and all of its game time but 5%. 50 Hz is not held
-                       and the stock machine does not start.
-                       Where the time goes (1 kHz profiler, 900 ticks): drawing the picture, the conversion, and the
-                       translated game code. Game time is lost in the passes over 8 frames: scene changes, where
-                       single ticks run up to 17,000 main-CPU instructions and change 7,600 bytes of video memory
-                       (up to 451,508 colour clocks, 6.4 frames, for one tick).
-                       Cheapest upgrade likely to reach full game speed: not measured.
-Not done, not tested:  sound beyond the commands the bench and the input scripts send; DAC samples; a display that
-                       holds 50 Hz; real A1200 hardware (Kickstart 3.1 was used in the emulator only); NTSC; a real
-                       Neo Geo Pocket (the reference machine was compared with Mednafen 1.29: two pictures of the
-                       intro, 0 of 24,320 pixels differ); play by a person (controls are wired, tested only by
-                       scripts); code no trace reached runs through the interpreter (976 functions are translated;
-                       random play on the host found new code about once in five hours); the profiling build on runs
-                       longer than 900 ticks (it did not finish 3,600); CI (the images cannot be committed to this
-                       public repository).
-How to run:            The floppy: tools/make_adf_ngpc.sh writes dist/ntm.adf (880 KB, it holds the cartridge: for the
-                       owner only). Boot it on an A1200 with 4 MB fast RAM and Kickstart 3.1; it loads for about a
-                       minute, unpacks for about a minute and starts the game.
-                       From a hard disk: put the cartridge image at original/ntm.ngc and, if you have it, the BIOS
-                       image at original/bios.ngp; tools/make_assets_ngpc.sh; then tools/port.sh fast. Copy dist/ntm,
-                       dist/rom.bin, dist/font.bin and dist/sound.bin to an Amiga with fast RAM and run "ntm" from a
-                       Shell ("ntm bench 3600" for the proof run). Joystick in port 2: stick = pad, button 1 (fire) =
-                       NGPC button 1 (A), button 2 = NGPC button 2 (B). Keys: cursor keys = pad, Z = button 1 (A),
-                       X = button 2 (B), Space or Return = Option, Esc = quit.
+Class and route:       planar. Binary TLCS-900/H code: the Step 1 table has no row for this CPU; the route is the one of
+                       "Assembly or disassembly for a Z80, 6502 or 6809 machine" (approved by the user in FEASIBILITY.md):
+                       translated once on the host (tools/recomp900.py, entry points found by tracing on the reference
+                       machine tools/ngpref) to C and to 68k assembly (tools/back900.py). Instructions with no inline
+                       form are one C function each (gen_ops.c); nothing is interpreted at run time; code no trace
+                       reached stops the game (ngp_fatal reason 2). K2GE, BIOS calls and interrupts are plain C
+                       (src/ngpc/ngp.c). The Z80 sound program is not run: a model answers the game, and its music and
+                       effects are recordings of the real program, mixed and played on Paula.
+Display:               planes=6 scroll=1 fetch=1 buffers=3 sprites used=5 (sprite_w 64) colours=64 playfield + 16 sprite
+                       bank. src/ngpc/hwdisp.c: the back scroll plane is a hardware-scrolled playfield of 16 x 16 tiles
+                       (composed from the 8 x 8 cells, cached in chip RAM; buffer rows 256-415 repeat 0-159 for the
+                       vertical wrap; columns outside the 160-pixel window cleared to black); the front plane and the
+                       sprites in front of it are five 64-pixel sprites in three strips (two 15-colour attached pairs,
+                       one 3-colour strip on the right); small sprite objects are disp_bob. Only what the game changed
+                       is drawn, within a time budget per picture (half of its two frames, minus the logic); the rest
+                       waits for the next pictures. A new picture every second vertical blank (PICTURE_HZ=25).
+Busiest moment:        play (course scrolling, ball, shadow and cursor as objects, HUD digits and mini-map changing):
+                       planned at 68.8% of a frame (FEASIBILITY.md section 5, logic 38% measured then). Measured over
+                       the bench with 4 MB fast RAM: logic 21,200 colour clocks a tick (60 ticks a second: 2 or 3 ticks
+                       a picture), worst tick 422,581 (scene setups); drawing 49,204 a picture, worst 286,206.
+Cut from the original: 25 pictures a second instead of 60 (the brief's last cut, the user's decision; game time follows
+                       the clock); the front plane and front sprites in 15 colours (3 in the right-hand 48 pixels: the
+                       mini-map's water shows green), nearest colour for the rest (1.0-4.4% of pixels differ on the
+                       host); large changes (a new screen, a front-plane scroll, the swing golfer) appear over several
+                       pictures; the Z80 (music and effects recorded per command; stereo folded to one side per
+                       voice; commands never recorded play nothing); saved games (flash writes forgotten); the serial
+                       link; the date (fixed); raster effects (not modelled, not seen used).
+Stock A1200 bench:     no bench.txt: the 2 MB cartridge (1,544 KB of data) and the program do not fit 2 MB of chip RAM,
+                       and the program stops before the takeover. tools/port.sh (FS-UAE 3.1.66, AROS ROM):
+                       FAIL: the program did not write a complete bench.txt (missing frames, late, worst_pct, shown_fps,
+                       ticks, checksum). The user chose fast RAM (FEASIBILITY.md decision 3).
+With 4 MB fast RAM:    tools/port.sh fast (FS-UAE 3.1.66, A1200, cycle-exact 68EC020, AROS ROM, 3,600 ticks):
+                       frames=1311 late=1708 worst_cck=1003137 avg_cck=110811 budget_cck=71051 worst_pct=1411 avg_pct=155 display_hz=50 shown_fps=21.7
+                       ticks=3600 checksum=ac36a76c game_speed=99%
+                       picture_hz=25: late counted beyond 2 blanks a picture: late_25=398 (the kit's late=1708), worst_pct limit 160
+                       FAIL: late_25=398: 398 vertical blanks went by without the new picture due every 2 (must be 0)
+                       FAIL: worst_pct=1411: the slowest picture is over 80% of its 2 frames
+                       FAIL: shown_fps=21.7: fewer than 25 pictures a second
+                       With 8 MB fast RAM (tools/bench.sh dist ntm 3600 shot.png --fast_memory=8192): the same two lines,
+                       to the digit. From the floppy with Kickstart 3.1 40.68 (supplied by the user), 600 ticks
+                       (tools/test_adf_ngpc.sh): frames=210 late=300 worst_pct=1408 shown_fps=20.5, checksum=37207302,
+                       equal to the host's.
+Host checksum:         ac36a76c after 3,600 ticks: equal. The translation equals the interpreter after every tick over
+                       the bench, idle, taps and mix inputs (tools/verify_ngpc.sh); the hardware display equals the
+                       reference renderer's course and objects in 3,000 of 3,000 pictures on each of four inputs with no
+                       work limit, the border is black, the front layer differs only by its colours
+                       (tools/hwdisp_test.c).
+Frame rate claim:      21.7 pictures shown a second (the 25-a-second mode), logic at 60 ticks a second (game time at 99%
+                       of the clock). 25 is not held and 50 is not. Where the late blanks come from (the bench's note):
+                       87 in pictures with a scene-setup tick (up to 422,581 colour clocks, 6 frames, in one tick), the
+                       others in pictures where 2-3 ticks and the drawing of a busy change pass two frames.
+                       Cheapest upgrade likely to hold 25 or 50: a faster CPU (68030); not measured.
+Not done, not tested:  holding the gates: the logic needs to be roughly twice as fast, and several times in scene setups
+                       (translator work and hand-written routines, PIPELINE.md); real A1200 hardware (Kickstart 3.1 only
+                       in the emulator); NTSC; play by a person (controls tested by scripts only); code no trace reached
+                       stops the game (976 functions are translated); sound beyond the recorded commands; CI (the images
+                       cannot be committed to this public repository).
+How to run:            The floppy: tools/make_adf_ngpc.sh writes dist/ntm.adf (880 KB; it holds the cartridge: for the
+                       owner only). Boot it on an A1200 with 4 MB (or more) fast RAM and Kickstart 3.x: it loads for
+                       about a minute, unpacks for about a minute and starts the game.
+                       From a hard disk: put the cartridge at original/ntm.ngc and, if you have it, the BIOS at
+                       original/bios.ngp; tools/make_assets_ngpc.sh; tools/port.sh fast. Copy dist/ntm, dist/rom.bin,
+                       dist/font.bin and dist/sound.bin to the Amiga and run "ntm" from a Shell ("ntm bench 3600" for
+                       the proof run). Joystick in port 2: stick = pad, button 1 = NGPC A, button 2 = NGPC B. Keys:
+                       cursor keys = pad, Z = A, X = B, Space or Return = Option, Esc = quit.

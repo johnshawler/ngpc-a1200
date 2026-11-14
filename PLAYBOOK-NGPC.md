@@ -12,11 +12,11 @@ A new session remembers nothing but this file and the tools next to it. To start
 State of the tools (2026-11, on one game, Neo Turf Masters): a game can be run, looked at, measured, traced,
 translated to C and to 68k assembly and proven equal to the interpreter; its sound program is replaced by a model of
 what the game sees of it, proven against the real one; it runs on the emulated A1200 with fast RAM at its own size in
-a black border, with its music and effects. It FAILS the brief: its display rebuilds each picture in software (the
-per-pixel class, which the brief keeps for per-pixel renderers; 4.5 new pictures a second of the 13.7 the game makes,
-late=1927 in the bench), and it interprets untranslated code at run time. The brief's route for a Neo Geo Pocket game
-is a hardware-scrolled tile map with sprites and kit objects; that display is not built yet. Start a port with an
-approved FEASIBILITY.md (CLAUDE.md, tools/check_rules.py).
+a black border, with its music and effects, on the brief's route: a hardware-scrolled tile playfield, the front plane
+in hardware sprites, small objects as blitter objects (`src/ngpc/hwdisp.c`), nothing interpreted at run time. It FAILS
+the gates (REPORT.txt): 21.7 pictures a second in the 25-a-second mode the user chose, late_25=398, because the
+translated logic (21k colour clocks a tick, up to 6 frames in one scene-setup tick) and the display's work at busy
+changes do not fit two frames. Start a port with FEASIBILITY.md (CLAUDE.md, tools/check_rules.py).
 
 ## 1. What is reusable, what is per game
 
@@ -356,14 +356,17 @@ Neo Turf Masters on Kickstart 3.1 (40.68): the same checksum and the same bench 
 
 ## 8. Not done yet (do it when a game needs it; the tools say when)
 
-- **Speed of the logic.** The 68k back end still calls a routine for every access that is not work RAM, keeps
-  bank registers in memory, saves flags with `move.w ccr,d3` after every instruction whose flags are read, and
-  steps `DIV`, `LDF`, `CPIR` and a few `PUSH`/`POP`/`EX` forms (25 sites in Neo Turf Masters, none hot). The next
-  gains: flags left in the CCR until they are needed, the display (below) before any of it.
-- **Speed of the display** (section 7).
-- **Coverage.** Random play still finds untranslated code about once in five hours of play; it then runs through
-  the interpreter on the Amiga (slower there, and against the brief's rule, which is why it is counted). Better
-  input for `tools/explore_ngpc.sh` (playing whole rounds, not random presses) would close more of it.
+- **Speed of the logic: what stands between Neo Turf Masters and the gates.** About 21k colour clocks a tick with
+  fast RAM (60 ticks a second), up to 6 frames in one scene-setup tick. The 68k back end still calls a routine for
+  every access that is not work RAM, keeps bank registers in memory and saves flags with `move.w ccr,d3` after
+  every instruction whose flags are read. Next: flags left in the CCR until needed, hand-written versions of the
+  hottest routines (`F_200c7b`, the object animator, 7%), chosen with `tools/prof_ngpc.sh` (PROF_CFLAGS=
+  -DNGP_PROF_HEAVY=<colour clocks> keeps only the heaviest ticks).
+- **The display's per-cell cost at busy changes**: about 190 map cells rewritten a frame during transitions, each
+  handled on its own (`back_cell_changed`, `front_map_cell_changed`); the front layer is still composed in C.
+- **Coverage.** Random play still finds untranslated code about once in five hours of play; it now stops the game
+  (the brief forbids interpreting it). Better input for `tools/explore_ngpc.sh` (playing whole rounds, not random
+  presses) would close more of it.
 - **Sound beyond the recordings** (section 7): commands the bench never sends are silent; stereo is folded (a
   voice on both sides plays on one); DAC samples are not played.
 - **Memory.** The whole cartridge image is loaded. A game that should run on a stock machine needs its data cut
@@ -447,3 +450,19 @@ sections above if a lesson is general.
   play still reaches runs through the interpreter on the Amiga instead of ending the game.
 - Next time: trace the attract mode and a long session of varied input on the first day, and verify the
   translation over those scripts as well as the bench; a bench path proves only the bench path.
+- The hardware display, same port, after the user asked to stop departing from the brief (2026-11-13/14). The
+  per-pixel display had been chosen against the brief's route; `tools/check_rules.py` and an approved FEASIBILITY.md
+  now stop that before any code. The new display (`src/ngpc/hwdisp.c`) was first proven on the host
+  (`tools/hwdisp_test.c`: a model of the kit's display compared with `k2ge.c` picture by picture), which found every
+  correctness fault before the Amiga did: stale rows of the vertical-wrap copy, memory that aliases every 512 pixels
+  (not just the next row), a BIOS call writing characters without marking them, blank-window frames. On the Amiga,
+  profile-led rounds took the drawing from 478k to about 40k colour clocks a frame: a time budget per picture instead
+  of fixed counts, tables instead of per-pixel loops, bitmasks instead of scans, a cache of composed tiles, work only
+  when something changed, scene changes in bulk. shown_fps went 4.5 (new pictures) / 8.9 -> 35.2 at 50 Hz; at the
+  user's 25 Hz, 21.7.
+- What did not move: the logic. 60 game ticks over 50 or 25 pictures puts 1-3 ticks in a picture, scene setups cost
+  up to 6 frames in one tick, and 4 MB or 8 MB of fast RAM give the same numbers to the digit. Without a much faster
+  logic neither 50 nor 25 pictures a second is held.
+- Next time: for a translated game, measure the logic's worst tick and its ticks per picture against the frame
+  before choosing the display, write FEASIBILITY.md's logic line from that measurement (not an average), and build
+  the host model of the display (with a picture-by-picture comparison) before the first Amiga build.
