@@ -5,6 +5,8 @@ bench.txt
 bench_fast.txt
 shot.png
 shot_fast.png
+bench_m1230.txt
+shot_m1230.png
 *.o
 out/
 __pycache__/
