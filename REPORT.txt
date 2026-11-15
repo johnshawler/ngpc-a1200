@@ -1,8 +1,6 @@
 PORT REPORT
-Verdict:               FAIL. Stopped at milestone 10's gates after real attempts, at the user's decision (2026-11-14).
-                       The port follows the brief's route (FEASIBILITY.md: hardware-scrolled tile map, sprites, kit
-                       objects; no run-time interpreter; tools/check_rules.py: no rule broken) and the game is correct
-                       (equal checksums), but neither 50 pictures a second nor the 25-a-second cut is held.
+Verdict:               FAIL. Stopped at milestone 10's gates after real attempts, at the user's decision (2026-11-14,
+                       again 2026-11-15 after the display fixes and two rounds of logic work).
 Game:                  Neo Turf Masters (SNK 1999, Neo Geo Pocket Color, World release, 2 MB cartridge, 60 Hz).
 Class and route:       planar. Binary TLCS-900/H code: the Step 1 table has no row for this CPU; the route is the one of
                        "Assembly or disassembly for a Z80, 6502 or 6809 machine" (approved by the user in FEASIBILITY.md):
@@ -14,16 +12,19 @@ Class and route:       planar. Binary TLCS-900/H code: the Step 1 table has no r
                        effects are recordings of the real program, mixed and played on Paula.
 Display:               planes=6 scroll=1 fetch=1 buffers=3 sprites used=5 (sprite_w 64) colours=64 playfield + 16 sprite
                        bank. src/ngpc/hwdisp.c: the back scroll plane is a hardware-scrolled playfield of 16 x 16 tiles
-                       (composed from the 8 x 8 cells, cached in chip RAM; buffer rows 256-415 repeat 0-159 for the
-                       vertical wrap; columns outside the 160-pixel window cleared to black); the front plane and the
-                       sprites in front of it are five 64-pixel sprites in three strips (two 15-colour attached pairs,
-                       one 3-colour strip on the right); small sprite objects are disp_bob. Only what the game changed
-                       is drawn, within a time budget per picture (half of its two frames, minus the logic); the rest
-                       waits for the next pictures. A new picture every second vertical blank (PICTURE_HZ=25).
+                       (composed from the 8 x 8 cells, cached in chip RAM; rows in view drawn, buffer rows 256-415 repeat
+                       0-159 for the vertical wrap; columns outside the 160-pixel window cleared to black); the front
+                       plane and the sprites in front of it are five 64-pixel sprites in three strips (two 15-colour
+                       attached pairs, one 3-colour strip on the right); small sprite objects are disp_bob. Only what
+                       the game changed is drawn, within a time budget per picture (70% of its two frames, minus the
+                       logic): the front layer first with half of it, the course with the rest, each resuming where the
+                       last picture stopped. A new screen stays black until it is complete (at most 2 s). A new
+                       picture every second vertical blank (PICTURE_HZ=25).
 Busiest moment:        play (course scrolling, ball, shadow and cursor as objects, HUD digits and mini-map changing):
                        planned at 68.8% of a frame (FEASIBILITY.md section 5, logic 38% measured then). Measured over
-                       the bench with 4 MB fast RAM: logic 21,200 colour clocks a tick (60 ticks a second: 2 or 3 ticks
-                       a picture), worst tick 422,581 (scene setups); drawing 49,204 a picture, worst 286,206.
+                       the bench with 4 MB fast RAM: logic 20,603 colour clocks a tick (60 ticks a second: 2 or 3 ticks
+                       a picture), worst tick 423,754 (scene setups); drawing 61,297 a picture, worst 284,454. The late
+                       pictures hold on average 155,660 colour clocks of logic and 62,814 of drawing.
 Cut from the original: 25 pictures a second instead of 60 (the brief's last cut, the user's decision; game time follows
                        the clock); the front plane and front sprites in 15 colours (3 in the right-hand 48 pixels: the
                        mini-map's water shows green), nearest colour for the rest (1.0-4.4% of pixels differ on the
@@ -35,32 +36,40 @@ Stock A1200 bench:     no bench.txt: the 2 MB cartridge (1,544 KB of data) and t
                        and the program stops before the takeover. tools/port.sh (FS-UAE 3.1.66, AROS ROM):
                        FAIL: the program did not write a complete bench.txt (missing frames, late, worst_pct, shown_fps,
                        ticks, checksum). The user chose fast RAM (FEASIBILITY.md decision 3).
-With 4 MB fast RAM:    tools/port.sh fast (FS-UAE 3.1.66, A1200, cycle-exact 68EC020, AROS ROM, 3,600 ticks):
-                       frames=1311 late=1708 worst_cck=1003137 avg_cck=110811 budget_cck=71051 worst_pct=1411 avg_pct=155 display_hz=50 shown_fps=21.7
+With 4 MB fast RAM:    tools/port.sh fast (FS-UAE 3.1.66, A1200, cycle-exact 68EC020, AROS ROM, 3,600 ticks, commit c1140d5):
+                       frames=1312 late=1703 worst_cck=1007791 avg_cck=123835 budget_cck=71051 worst_pct=1418 avg_pct=174 display_hz=50 shown_fps=21.7
                        ticks=3600 checksum=ac36a76c game_speed=99%
-                       picture_hz=25: late counted beyond 2 blanks a picture: late_25=398 (the kit's late=1708), worst_pct limit 160
-                       FAIL: late_25=398: 398 vertical blanks went by without the new picture due every 2 (must be 0)
-                       FAIL: worst_pct=1411: the slowest picture is over 80% of its 2 frames
+                       picture_hz=25: late counted beyond 2 blanks a picture: late_25=392 (the kit's late=1703), worst_pct limit 160
+                       FAIL: late_25=392: 392 vertical blanks went by without the new picture due every 2 (must be 0)
+                       FAIL: worst_pct=1418: the slowest picture is over 80% of its 2 frames
                        FAIL: shown_fps=21.7: fewer than 25 pictures a second
-                       With 8 MB fast RAM (tools/bench.sh dist ntm 3600 shot.png --fast_memory=8192): the same two lines,
-                       to the digit. From the floppy with Kickstart 3.1 40.68 (supplied by the user), 600 ticks
-                       (tools/test_adf_ngpc.sh): frames=210 late=300 worst_pct=1408 shown_fps=20.5, checksum=37207302,
-                       equal to the host's.
+                       With 8 MB fast RAM (measured on commit 6f89f68): the same lines as 4 MB, to the digit. From the
+                       floppy with Kickstart 3.1 40.68 (supplied by the user), 600 ticks (tools/test_adf_ngpc.sh):
+                       frames=210 late=300 worst_pct=1415 shown_fps=20.5, checksum=37207302, equal to the host's.
+                       The user's machine, an A1200 with an M-Tec M1230 XA (68030 at 33 MHz): not measured. FS-UAE cannot
+                       run a cycle-exact 68030 at that clock (its cycle-exact mode keeps memory at A1200 speed), and its
+                       throttled mode charges kinds of code so differently that the game's logic came out 1x to 2.7x the
+                       68020's depending on the calibration (tools/port.sh m1230, an ESTIMATE that never claims a PASS:
+                       25 to 290 late blanks over runs and hosts). A bench floppy for the real machine:
+                       tools/make_adf_ngpc.sh dist/ntm_bench.adf "ntm bench 3600".
 Host checksum:         ac36a76c after 3,600 ticks: equal. The translation equals the interpreter after every tick over
                        the bench, idle, taps and mix inputs (tools/verify_ngpc.sh); the hardware display equals the
                        reference renderer's course and objects in 3,000 of 3,000 pictures on each of four inputs with no
                        work limit, the border is black, the front layer differs only by its colours
                        (tools/hwdisp_test.c).
 Frame rate claim:      21.7 pictures shown a second (the 25-a-second mode), logic at 60 ticks a second (game time at 99%
-                       of the clock). 25 is not held and 50 is not. Where the late blanks come from (the bench's note):
-                       87 in pictures with a scene-setup tick (up to 422,581 colour clocks, 6 frames, in one tick), the
-                       others in pictures where 2-3 ticks and the drawing of a busy change pass two frames.
-                       Cheapest upgrade likely to hold 25 or 50: a faster CPU (68030); not measured.
-Not done, not tested:  holding the gates: the logic needs to be roughly twice as fast, and several times in scene setups
-                       (translator work and hand-written routines, PIPELINE.md); real A1200 hardware (Kickstart 3.1 only
-                       in the emulator); NTSC; play by a person (controls tested by scripts only); code no trace reached
-                       stops the game (976 functions are translated); sound beyond the recorded commands; CI (the images
-                       cannot be committed to this public repository).
+                       of the clock), on the emulated A1200 with fast RAM. 25 is not held and 50 is not. Late pictures
+                       are those with scene-setup logic (up to 423,754 colour clocks, 6 frames, in one tick) or 2-3 heavy
+                       ticks. On the M1230 XA: not measured.
+                       Cheapest upgrade likely to hold 25: a faster CPU; how fast the user's 33 MHz 68030 runs this code
+                       is not known (see above).
+Not done, not tested:  holding the gates: the logic needs to be roughly twice as fast, and several times in scene setups.
+                       Peepholes gave about 5% (byte read-modify-write in one instruction); halving it needs a smarter
+                       translator (pointers proven to stay in work RAM, the TLCS 8-bit register halves in 68k registers).
+                       Real A1200 hardware and the user's 68030 (Kickstart 3.1 only in the emulator); NTSC; play by a
+                       person (controls tested by scripts only); code no trace reached stops the game (976 functions are
+                       translated); sound beyond the recorded commands; CI (the images cannot be committed to this
+                       public repository).
 How to run:            The floppy: tools/make_adf_ngpc.sh writes dist/ntm.adf (880 KB; it holds the cartridge: for the
                        owner only). Boot it on an A1200 with 4 MB (or more) fast RAM and Kickstart 3.x: it loads for
                        about a minute, unpacks for about a minute and starts the game.

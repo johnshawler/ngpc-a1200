@@ -466,3 +466,15 @@ sections above if a lesson is general.
 - Next time: for a translated game, measure the logic's worst tick and its ticks per picture against the frame
   before choosing the display, write FEASIBILITY.md's logic line from that measurement (not an average), and build
   the host model of the display (with a picture-by-picture comparison) before the first Amiga build.
+- Display starvation, same port (2026-11-15): with a time budget per picture, whatever runs first can take it all. The
+  course tiles starved the front layer, composing starved converting, and a full redraw that always restarted at the
+  top row never reached the middle: on the Amiga old content (the title logo, missing golfer portraits) stayed for good
+  while the host model, with no clock, looked right. Give each stage its share, resume where the last picture stopped,
+  and test with `tools/hwdisp_test.c -b` (a simulated clock) before the Amiga. Changed characters are not a scene
+  change: games animate by uploading them, and treating them as one kept the screen black.
+- Accelerators: FS-UAE's cycle-exact 68030 keeps memory at A1200 speed (x4 to x16 the clock bought 10-25%), and its
+  throttled mode charges kinds of code so differently that a calibration on one workload says little about the game
+  (1x to 2.7x). An accelerated target needs the real machine (`tools/make_adf_ngpc.sh out.adf "ntm bench 3600"`).
+- Logic: peepholes on the 68k back end buy a few percent each (byte read-modify-write in one instruction: 5%); the cost
+  is spread over thousands of instructions that each range-check memory through registers and rotate for the 8-bit
+  register halves. Halving it needs the translator to prove pointers stay in work RAM and to keep register halves apart.

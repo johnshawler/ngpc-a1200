@@ -56,10 +56,10 @@ The same order, with these differences (details in `PLAYBOOK-NGPC.md`):
 
 ## Part B: backlog for this port (Neo Turf Masters), by expected gain per effort
 
-Status: FAIL, stopped at the gates at the user's decision (2026-11-14); REPORT.txt has the hand-back. On the brief's
+Status: FAIL, stopped at the gates at the user's decision (2026-11-15); REPORT.txt has the hand-back. On the brief's
 route (hardware display, no interpreter, rules check passes); 25 pictures a second chosen by the user; tools/port.sh
-fast: late_25=398 worst_pct=1411 shown_fps=21.7 checksum=ac36a76c (equal). What blocks the gates is the speed of the
-translated logic (item 9 and the logic-peaks row below).
+fast: late_25=392 worst_pct=1418 shown_fps=21.7 checksum=ac36a76c (equal). What blocks the gates is the speed of the
+translated logic (item 9 and the logic-peaks row below); the user's 68030 could not be measured in the emulator.
 
 | Priority | Item | Why |
 | --- | --- | --- |
