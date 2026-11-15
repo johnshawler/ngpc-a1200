@@ -11,12 +11,14 @@ OPT=""; OUT=bench.txt; SHOT=shot.png
 if [ "$1" = fast ]; then OPT="--fast_memory=4096"; OUT=bench_fast.txt; SHOT=shot_fast.png; fi
 # m1230: an ESTIMATE for the user's A1200 with an M-Tec M1230 XA (68030 at 33 MHz, 2 MB chip, 4 MB fast). FS-UAE cannot run
 # a cycle-exact 68030 at that clock (its cycle-exact mode keeps memory at A1200 speed: x4 to x16 the clock bought 10-25%),
-# so the CPU runs untimed but throttled, with the chipset and the blitter cycle-exact. The throttle is calibrated to the
-# brief's table: a 50 MHz 68030 with fast RAM is about 6x a stock A1200 for logic, fast RAM alone 1.5x, so 33 MHz is about
+# so the CPU runs untimed but throttled, with the chipset and the blitter cycle-exact. The throttle is calibrated on each
+# host (it depends on the host's speed) with a fixed workload that is not the game (tools/calib_m1230.sh) to the brief's table: a 50 MHz 68030 with fast RAM is about 6x a stock A1200 for logic, fast RAM alone 1.5x, so 33 MHz is about
 # 2.7x this port's logic with fast RAM (18.5k -> about 6.9k colour clocks a tick). Not a cycle-exact measurement: the brief
 # accepts only those (or a real machine) as proof, so this mode never claims a PASS.
 if [ "$1" = m1230 ]; then
-  OPT="--fast_memory=4096 --cpu=68030 --uae_cpu_cycle_exact=false --uae_cpu_compatible=true --uae_cpu_speed=max --uae_blitter_cycle_exact=true --uae_cpu_throttle=-660"
+  TH=$(tools/calib_m1230.sh) || { echo "FAIL: calibration (tools/calib_m1230.sh)"; exit 1; }   # on this host
+  echo "m1230: CPU throttle -$TH (calibrated on this host by tools/calib_m1230.sh)"
+  OPT="--fast_memory=4096 --cpu=68030 --uae_cpu_cycle_exact=false --uae_cpu_compatible=true --uae_cpu_speed=max --uae_blitter_cycle_exact=true --uae_cpu_throttle=-$TH"
   OUT=bench_m1230.txt; SHOT=shot_m1230.png; ESTIMATE=1
 fi
 # KICKSTART=<file>: boot a Kickstart ROM the user supplied (keep it in original/, never commit it) instead of the free

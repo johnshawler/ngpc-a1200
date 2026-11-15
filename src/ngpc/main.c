@@ -47,7 +47,8 @@ static ULONG palette[256];
 #define VBL_PER_PICTURE (50 / PICTURE_HZ)
 #define FRAME_TARGET (71051UL * VBL_PER_PICTURE * 70 / 100)   /* logic and drawing of a pass: 70% of its frames */
 static ULONG w_st, w_ti, w_fr, w_ob, st_big, st_big_sum;              /* the phases of the slowest drawing */
-static ULONG flip_vbl, late_heavy, late_other, pass_logic_max;   /* late blanks in passes with a heavy tick (over 100k) or not */                           /* sys_frame at the end of the last game_draw: the flip came one later */
+static ULONG prev_logic;
+static ULONG flip_vbl, late_heavy, late_other, pass_logic_max, pass_logic, late_n, late_lg, late_dr, late_st, last_draw, last_st;   /* late blanks in passes with a heavy tick (over 100k) or not */                           /* sys_frame at the end of the last game_draw: the flip came one later */
 #define DRAW_FLOOR 6000UL                        /* the drawing that always happens: objects, sprites, colours */
 static ULONG logic_at_draw;
 static ULONG ph_draw;
@@ -154,6 +155,7 @@ static void game_draw(void)
 #endif
     t = sys_now() - t0;
     if (hwdisp_last.t_start > 40000) { st_big++; st_big_sum += hwdisp_last.t_start; }
+    last_draw = t; last_st = hwdisp_last.t_start;
     draw_total += t; if (t > draw_worst) { draw_worst = t; w_st = hwdisp_last.t_start; w_ti = hwdisp_last.t_tiles; w_fr = hwdisp_last.t_front; w_ob = hwdisp_last.t_objs; }
     hw_tiles += hwdisp_last.tiles; hw_cells += hwdisp_last.cells;
     ph_start += hwdisp_last.t_start; ph_tiles += hwdisp_last.t_tiles; ph_front += hwdisp_last.t_front; ph_objs += hwdisp_last.t_objs; ph_composed += hwdisp_last.composed; ph_draw += hwdisp_last.t_draw;
@@ -199,15 +201,18 @@ int main(int argc, char **argv)
             { ULONG c0 = prof_cnt;
 #endif
             game_tick(bench ? game_bench_input(ticks) : read_input());
-            t1 = sys_now() - t1; logic_total += t1; if (t1 > logic_worst) logic_worst = t1; if (t1 > pass_logic_max) pass_logic_max = t1;
+            t1 = sys_now() - t1; logic_total += t1; if (t1 > logic_worst) logic_worst = t1; if (t1 > pass_logic_max) pass_logic_max = t1; pass_logic += t1;
 #ifdef NGP_PROF_HEAVY
             if (t1 < NGP_PROF_HEAVY) prof_cnt = c0; }
 #endif
             ticks++;
         }
         game_draw();
-        if (vblanks > VBL_PER_PICTURE && frames) { if (pass_logic_max > 100000) late_heavy += vblanks - VBL_PER_PICTURE; else late_other += vblanks - VBL_PER_PICTURE; }
-        pass_logic_max = 0;
+        if (vblanks > VBL_PER_PICTURE && frames) {
+            if (pass_logic_max > 100000) late_heavy += vblanks - VBL_PER_PICTURE; else late_other += vblanks - VBL_PER_PICTURE;
+            late_n++; late_lg += prev_logic; late_dr += last_draw; late_st += last_st;   /* the previous pass ran over */
+        }
+        prev_logic = pass_logic; pass_logic_max = 0; pass_logic = 0;
         frames++;
         perf_frame_end(sys_now() - t0);
         if (sys_keys[KEY_ESC] || (bench && ticks >= bench) || ngp_fatal_why) break;
@@ -229,11 +234,11 @@ int main(int argc, char **argv)
         /* the note holds 127 characters: colour clocks of logic a tick (worst), drawing a frame (worst); late blanks in
            passes with a tick over 100k (lh) and in the others (lo); start and tile phases a frame; start phases over 40k
            (sb: how many / their average) */
-        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu lh=%lu lo=%lu st=%lu ti=%lu sb=%lu/%lu",
+        sprintf(text, "ticks=%lu checksum=%08lx game_speed=%lu%%\nlg=%lu/%lu dr=%lu/%lu lh=%lu lo=%lu st=%lu L:n=%lu lg=%lu dr=%lu st=%lu",
                 (unsigned long)ticks, (unsigned long)game_checksum(), (unsigned long)(ticks * hz * 100 / TICKS_PER_SECOND / (perf_frames + perf_late)),
                 (unsigned long)(ticks ? logic_total / ticks : 0), (unsigned long)logic_worst, (unsigned long)(frames ? draw_total / frames : 0),
                 (unsigned long)draw_worst, (unsigned long)late_heavy, (unsigned long)late_other, (unsigned long)(ph_start / frames),
-                (unsigned long)(ph_tiles / frames), (unsigned long)st_big, (unsigned long)(st_big ? st_big_sum / st_big : 0));
+                (unsigned long)late_n, (unsigned long)(late_n ? late_lg / late_n : 0), (unsigned long)(late_n ? late_dr / late_n : 0), (unsigned long)(late_n ? late_st / late_n : 0));
         perf_note(text);
 
         perf_save("bench.txt");
