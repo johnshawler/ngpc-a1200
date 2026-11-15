@@ -135,6 +135,14 @@ tile and the sound: about 520 KB.
    The referee judges this mode with the brief's gates scaled to two frames a picture (tools/check_gates.py
    --picture-hz 25: no blank beyond the second, worst_pct at most 160, shown_fps 25.0); the hand-back says so.
 
+## 8a. Target machine, changed by the user (2026-11-15)
+
+The user's machine: A1200 with an M-Tec M1230 XA (68030 at 33 MHz), 2 MB chip RAM, 4 MB fast RAM. FS-UAE cannot run a
+cycle-exact 68030 at that clock, so `tools/port.sh m1230` gives an ESTIMATE (CPU throttled to about 2.7x the A1200's logic
+speed with fast RAM, from the brief's accelerator figures; chipset and blitter cycle-exact). It never prints PASS: the
+brief takes frame rates only from a cycle-exact emulator or a real machine. The stock-CPU gates (`tools/port.sh fast`)
+stay the measured result.
+
 ## 8. Decisions for the user
 
 1. **The route.** The brief has no TLCS-900/H row and says "Binary only: ask the user". This plan uses the Z80/6502/
